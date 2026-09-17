@@ -11,3 +11,4 @@ services:
       MYMATE_STATUS_TOKEN: "replace-with-secret-on-target-host"
     ports:
       - "127.0.0.1:8788:80"
+      - "127.0.0.1:8789:8080"

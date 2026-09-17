@@ -1,4 +1,10 @@
 server {
+  listen 8080;
+  server_name _;
+  return 301 https://status.z4tek.com$request_uri;
+}
+
+server {
   listen 80;
   server_name _;
   root /usr/share/nginx/html;
