@@ -1,0 +1,14 @@
+services:
+  status-page:
+    build: .
+    image: z4-status-page:lab
+    container_name: z4-status-page-lab
+    restart: unless-stopped
+    environment:
+      STATUS_BRAND_NAME: "Z4 Internet"
+      STATUS_SUBTITLE: "Live service health"
+      STATUS_POLL_MS: "30000"
+      MYMATE_API_URL: "http://10.10.50.150"
+      MYMATE_STATUS_TOKEN: ${STATUS_API_TOKEN:?Set STATUS_API_TOKEN in the protected compose environment}
+    ports:
+      - "10.10.50.150:8788:80"

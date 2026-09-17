@@ -20,6 +20,7 @@ class StoreMaintenanceWindowRequest extends FormRequest
 
         return [
             'name' => [$creating ? 'required' : 'sometimes', 'string', 'max:255'],
+            'description' => ['sometimes', 'nullable', 'string', 'max:10000'],
             'starts_at' => [$creating ? 'required' : 'sometimes', 'date'],
             'ends_at' => [$creating ? 'required' : 'sometimes', 'date', 'after:starts_at'],
             'enabled' => ['sometimes', 'boolean'],

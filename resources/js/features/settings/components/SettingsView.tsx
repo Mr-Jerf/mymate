@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowsClockwise, ArrowRight, Broadcast, ChartLine, Check, CloudArrowDown, Copy, Envelope, Eye, EyeSlash, Fingerprint, FloppyDisk, Gauge, GearSix, Info, Key, LockKey, PaperPlaneTilt, Plus, PencilSimple, ShieldCheck, Terminal, Trash, UsersThree, X } from '@phosphor-icons/react';
+import { ArrowsClockwise, ArrowRight, Broadcast, ChartLine, Check, CloudArrowDown, Copy, Envelope, Eye, EyeSlash, Fingerprint, FloppyDisk, Gauge, GearSix, Info, Key, LockKey, MapPin, PaperPlaneTilt, Plus, PencilSimple, ShieldCheck, Terminal, Trash, UsersThree, X } from '@phosphor-icons/react';
 import { Toggle } from '../../../components/Toggle';
 import { usePasskeys, useRegisterPasskey, useDeletePasskey, useSecuritySettings, useUpdateSecuritySettings, type Passkey } from '../../auth/api/passkeys';
 import { passkeysSupported } from '../../auth/lib/passkey';
@@ -7,6 +7,7 @@ import { useSettings, useUpdateSettings } from '../api/getSettings';
 import { useUpdateCheck } from '../api/updateCheck';
 import { useSystemStatus, type StatusLevel } from '../api/systemStatus';
 import { SensorsSection } from './SensorsSection';
+import { NetworkLocationsSection } from './NetworkLocationsSection';
 import { useCredentials, useSaveCredential, useDeleteCredential, type CredentialInput } from '../api/credentials';
 import { useMailSettings, useUpdateMailSettings, useTestMail, type MailSettingsInput } from '../api/mailSettings';
 import { useBackupSettings, useUpdateBackupSettings, useTestBackupEngine, type BackupSettingsInput } from '../api/backupSettings';
@@ -1709,6 +1710,7 @@ const TABS: Tab[] = [
     { id: 'backups', label: 'Backups', icon: FloppyDisk, adminOnly: true, render: () => <BackupEngineSection /> },
     { id: 'credentials', label: 'Credentials', icon: Key, adminOnly: true, render: () => <CredentialsSection /> },
     { id: 'sensors', label: 'Sensors', icon: Gauge, adminOnly: true, render: () => <SensorsSection /> },
+    { id: 'network', label: 'Network status', icon: MapPin, adminOnly: true, render: () => <NetworkLocationsSection /> },
     { id: 'graphs', label: 'Graphs', icon: ChartLine, adminOnly: true, render: () => <GraphDefaultsSection /> },
     { id: 'operators', label: 'Operators', icon: UsersThree, render: () => <UsersSection /> },
     { id: 'agents', label: 'Agents', icon: Broadcast, render: () => <AgentsSection /> },

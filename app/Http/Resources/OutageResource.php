@@ -18,6 +18,9 @@ class OutageResource extends JsonResource
             'duration_s' => $this->duration_s,
             'ongoing' => $this->ended_at === null,
             'cause' => $this->cause,
+            'incident_id' => $this->status_incident_id,
+            'incident_severity' => $this->incident?->severity,
+            'incident_status' => $this->incident?->status,
         ];
     }
 }

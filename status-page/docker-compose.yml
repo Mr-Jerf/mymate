@@ -1,0 +1,13 @@
+services:
+  status-page:
+    build: .
+    image: z4-status-page:lab
+    restart: unless-stopped
+    environment:
+      STATUS_BRAND_NAME: "Example ISP"
+      STATUS_SUBTITLE: "Live service health"
+      STATUS_POLL_MS: "30000"
+      MYMATE_API_URL: "https://mymate.example.com"
+      MYMATE_STATUS_TOKEN: "replace-with-secret-on-target-host"
+    ports:
+      - "127.0.0.1:8788:80"

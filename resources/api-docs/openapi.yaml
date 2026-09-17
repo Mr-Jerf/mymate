@@ -2215,6 +2215,150 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Health" }
+  /public/status:
+    get:
+      tags: [System]
+      summary: Public network status by site
+      description: |
+        Requires the deployment-specific status API key. Returns only explicitly created MyMate sites
+        with supported state assignments. Site names are public display labels; device names, management
+        addresses, topology, and customer data are excluded. Results are suitable for a public status page.
+        Rate limited (60/min).
+      security: [{ statusApiKey: [] }]
+      responses:
+        "200":
+          description: Current aggregate network status.
+          headers:
+            Cache-Control:
+              description: Client/proxy caching policy.
+              schema: { type: string, example: "public, max-age=30, s-maxage=30" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [overall, sites, generated_at]
+                    properties:
+                      overall:
+                        type: object
+                        required: [status, label]
+                        properties:
+                          status: { type: string, enum: [operational, degraded, outage, unknown] }
+                          label: { type: string }
+                      sites:
+                        type: array
+                        description: Explicitly created, state-assigned MyMate sites.
+                        items:
+                          type: object
+                          required: [key, name, state_code, state_name, status, uptime_60d, monitored_devices, down_devices, unknown_devices, history_7d]
+                          properties:
+                            key: { type: string, description: Opaque public site key }
+                            name: { type: string }
+                            state_code: { type: string, pattern: '^[A-Z]{2}$' }
+                            state_name: { type: string }
+                            status: { type: string, enum: [operational, degraded, outage, unknown] }
+                            uptime_60d: { type: number, format: float, nullable: true, minimum: 0, maximum: 100 }
+                            monitored_devices: { type: integer, minimum: 0 }
+                            down_devices: { type: integer, minimum: 0 }
+                            unknown_devices: { type: integer, minimum: 0 }
+                            history_7d: { type: array, items: { type: object } }
+                      maintenance:
+                        type: array
+                        description: Public fleet-wide active or upcoming maintenance notices; device-specific scopes are excluded.
+                        items:
+                          type: object
+                          required: [overview, description, starts_at, ends_at, status, active]
+                          properties:
+                            overview: { type: string }
+                            description: { type: string, nullable: true }
+                            starts_at: { type: string, format: date-time, nullable: true }
+                            ends_at: { type: string, format: date-time, nullable: true }
+                            status: { type: string, enum: [scheduled, active, completed] }
+                            active: { type: boolean }
+                      status_feed:
+                        type: array
+                        description: Active site-level outage updates; device names and internal details are omitted.
+                        items:
+                          type: object
+                          required: [incident_id, site, site_key, state, site_status, summary, status, started_at, ended_at, active, updates]
+                          properties:
+                            incident_id: { type: integer }
+                            site: { type: string, nullable: true }
+                            site_key: { type: string, nullable: true }
+                            state: { type: string, pattern: '^[A-Z]{2}$', description: Site state code }
+                            site_status: { type: string, enum: [degraded, outage] }
+                            summary: { type: string }
+                            status: { type: string, enum: [investigating, monitoring, resolved] }
+                            started_at: { type: string, format: date-time, nullable: true }
+                            ended_at: { type: string, format: date-time, nullable: true }
+                            active: { type: boolean }
+                            updates:
+                              type: array
+                              items:
+                                type: object
+                                required: [message, created_at]
+                                properties:
+                                  message: { type: string }
+                                  created_at: { type: string, format: date-time, nullable: true }
+                      generated_at: { type: string, format: date-time }
+        "429": { description: Rate limit exceeded. }
+  /outages/{outage}/updates:
+    get:
+      tags: [Outages]
+      summary: List outage status updates
+      security: [{ sanctum: [] }]
+      parameters:
+        - in: path
+          name: outage
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Chronological operator status updates for one outage.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, message, created_at]
+                      properties:
+                        id: { type: integer }
+                        message: { type: string }
+                        created_at: { type: string, format: date-time }
+                        author: { type: string, nullable: true }
+        "401": { description: Unauthenticated. }
+    post:
+      tags: [Outages]
+      summary: Post an outage status update
+      description: Admin-only, rate limited to 30 posts per minute. The message is intended for the public state-level status feed.
+      security: [{ sanctum: [] }]
+      parameters:
+        - in: path
+          name: outage
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, minLength: 2, maxLength: 4000 }
+      responses:
+        "201": { description: Status update created. }
+        "401": { description: Unauthenticated. }
+        "403": { description: Administrator required. }
+        "422": { description: Validation failed. }
+        "429": { description: Rate limit exceeded. }
   /contact:
     post:
       tags: [System]
@@ -2246,6 +2390,11 @@ components:
       type: http
       scheme: bearer
       description: Personal API key. Create one under Settings → Account → API keys.
+    statusApiKey:
+      type: apiKey
+      in: header
+      name: X-Status-Api-Key
+      description: Deployment-specific read-only token held by the server-side status proxy.
 
   parameters:
     DeviceId:
@@ -2820,6 +2969,8 @@ components:
       properties:
         id: { type: integer }
         name: { type: string }
+        overview: { type: string }
+        description: { type: string, nullable: true }
         starts_at: { type: string, format: date-time, nullable: true }
         ends_at: { type: string, format: date-time, nullable: true }
         scope: { $ref: "#/components/schemas/Scope" }
@@ -2830,6 +2981,7 @@ components:
       required: [name, starts_at, ends_at]
       properties:
         name: { type: string, maxLength: 255 }
+        description: { type: string, nullable: true, maxLength: 10000 }
         starts_at: { type: string, format: date-time }
         ends_at: { type: string, format: date-time, description: "After starts_at." }
         enabled: { type: boolean }

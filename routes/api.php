@@ -30,7 +30,9 @@ use App\Http\Controllers\Api\MailSettingController;
 use App\Http\Controllers\Api\MaintenanceWindowController;
 use App\Http\Controllers\Api\MapController;
 use App\Http\Controllers\Api\MapShareController;
+use App\Http\Controllers\Api\NetworkStatusController;
 use App\Http\Controllers\Api\OutageController;
+use App\Http\Controllers\Api\OutageUpdateController;
 use App\Http\Controllers\Api\PasskeyController;
 use App\Http\Controllers\Api\ProbeController;
 use App\Http\Controllers\Api\PublicWallController;
@@ -41,6 +43,7 @@ use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SubnetController;
 use App\Http\Controllers\Api\SystemStatusController;
+use App\Http\Controllers\Api\StatusIncidentController;
 use App\Http\Controllers\Api\Tools\ToolsController;
 use App\Http\Controllers\Api\TraceController;
 use App\Http\Controllers\Api\UpdateCheckController;
@@ -58,6 +61,10 @@ Route::get('health', HealthController::class)->name('health');
 // Public "contact sales" form (sales demo). No auth - an anonymous visitor may submit;
 // rate-limited to deter abuse.
 Route::post('contact', [ContactController::class, 'store'])->middleware('throttle:5,1')->name('contact');
+
+// Public state-level network health; aggregate-only and protected by a deployment-specific status token.
+Route::get('public/status', NetworkStatusController::class)
+    ->middleware(['throttle:60,1', 'status-token'])->name('public.status');
 
 // Public wallboard (GitHub #15): an unguessable per-map share token grants a read-only,
 // no-login view of one map. Token-gated, read-only, and rate-limited. The payload is a
@@ -300,8 +307,14 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     Route::patch('maps/{map}/shares/{share}', [MapShareController::class, 'update'])->name('maps.shares.update');
     Route::delete('maps/{map}/shares/{share}', [MapShareController::class, 'destroy'])->name('maps.shares.destroy');
 
+    Route::get('status-incidents', [StatusIncidentController::class, 'index'])->name('status-incidents.index');
+    Route::patch('status-incidents/{statusIncident}', [StatusIncidentController::class, 'update'])->name('status-incidents.update');
+    Route::get('status-incidents/{statusIncident}/updates', [StatusIncidentController::class, 'updates'])->name('status-incidents.updates.index');
+    Route::post('status-incidents/{statusIncident}/updates', [StatusIncidentController::class, 'storeUpdate'])->middleware('throttle:30,1')->name('status-incidents.updates.store');
     // Outage timeline - ?device_id= , ?state=open|closed.
     Route::get('outages', [OutageController::class, 'index'])->name('outages.index');
+    Route::get('outages/{outage}/updates', [OutageUpdateController::class, 'index'])->name('outages.updates.index');
+    Route::post('outages/{outage}/updates', [OutageUpdateController::class, 'store'])->middleware('throttle:30,1')->name('outages.updates.store');
 
     // MikroTik "The Dude" import (FR-Dude): upload a dude.db, then poll the run for
     // live stage/percent/ETA; cancel stops it cleanly.

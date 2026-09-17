@@ -385,6 +385,7 @@ function MaintenanceForm({ initial, onDone }: { initial?: MaintenanceWindow; onD
     const [form, setForm] = useState<MaintenanceWindowInput>({
         id: initial?.id,
         name: initial?.name ?? '',
+        description: initial?.description ?? '',
         starts_at: toLocalInput(initial?.starts_at ?? null) || toLocalInput(new Date().toISOString()),
         ends_at: toLocalInput(initial?.ends_at ?? null) || toLocalInput(new Date(Date.now() + 2 * 3600_000).toISOString()),
         scope: initial?.scope ?? { type: 'all' },
@@ -407,7 +408,8 @@ function MaintenanceForm({ initial, onDone }: { initial?: MaintenanceWindow; onD
 
     return (
         <div className="space-y-2.5 rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/10">
-            <input className={field} placeholder="What's happening (e.g. Core router upgrade)" value={form.name} onChange={(e) => set('name', e.target.value)} />
+            <input className={field} placeholder="Overview (e.g. Core router upgrade)" value={form.name} onChange={(e) => set('name', e.target.value)} />
+            <textarea className={`${field} min-h-24 resize-y`} placeholder="Description (what customers should know, expected impact, and additional details)" value={form.description ?? ''} onChange={(e) => set('description', e.target.value)} />
             <label className="flex items-center justify-between gap-3 text-sm text-white/70">
                 <span>Start</span>
                 <input type="datetime-local" className="w-56 rounded-xl bg-white/[0.03] px-3 py-2 text-sm text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60" value={form.starts_at} onChange={(e) => set('starts_at', e.target.value)} />

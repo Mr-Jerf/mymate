@@ -1,0 +1,14 @@
+server {
+  listen 80;
+  server_name _;
+  root /usr/share/nginx/html;
+  index index.html;
+  location = /api/status {
+    proxy_pass ${MYMATE_API_URL}/api/public/status;
+    proxy_set_header X-Status-Api-Key "${MYMATE_STATUS_TOKEN}";
+    proxy_set_header Accept "application/json";
+    proxy_ssl_server_name on;
+  }
+  location / { try_files $uri $uri/ /index.html; }
+  add_header Cache-Control "no-cache" always;
+}

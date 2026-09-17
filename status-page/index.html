@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Status</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="header">
+      <div class="brand-mark" aria-hidden="true">●</div>
+      <div><h1 id="brand">Network Status</h1><p id="subtitle">Live service health</p></div>
+      <span id="last-checked" class="last">Checking…</span>
+    </header>
+    <section id="overall" class="overall loading"><span class="pulse"></span><div><strong>Loading status…</strong><small>Connecting to monitoring service</small></div></section>
+    <div class="section-title"><h2>Service by site</h2><span>60-day availability</span></div>
+    <section id="sites" class="states" aria-live="polite"></section>
+    <section id="activity" class="activity" hidden><h2 id="activity-title"></h2><div id="activity-body"></div></section>
+    <section id="incidents" class="feed" hidden><h2>Current status updates</h2><div id="incident-list"></div></section>
+    <section id="maintenance" class="maintenance" hidden><h2>Maintenance</h2><div id="maintenance-list"></div></section>
+    <p id="error" class="error" hidden></p>
+    <footer><span id="footer-brand">Network Operations</span><span>Updates automatically</span></footer>
+  </main>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -515,6 +515,7 @@ export interface DeviceSensorReading {
 export interface MaintenanceWindow {
     id: number;
     name: string;
+    description: string | null;
     starts_at: string | null;
     ends_at: string | null;
     scope: AlertScope;
@@ -566,6 +567,9 @@ export interface Outage {
     duration_s: number | null;
     ongoing: boolean;
     cause: string | null;
+    incident_id: number | null;
+    incident_severity: 'outage' | 'degraded' | null;
+    incident_status: 'investigating' | 'monitoring' | 'resolved' | null;
 }
 
 // Live throughput event (App\Events\InterfaceUtilUpdated) - coalesced across devices.

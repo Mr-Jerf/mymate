@@ -4,32 +4,50 @@ namespace App\Actions\Outages;
 
 use App\Models\Device;
 use App\Models\Outage;
+use App\Models\StatusIncident;
+use App\Services\NetworkStatus;
+use Illuminate\Support\Facades\DB;
 
-/**
- * Record device down->up events, driven off the up/down sweep.
- * Idempotent: at most one open outage per device.
- */
+/** Record device down->up events and attach them to one customer-facing incident per site. */
 class RecordOutage
 {
-    /** A device just went down -> open an outage (reuse an already-open one). */
     public function open(Device $device): void
     {
-        Outage::firstOrCreate(
-            ['device_id' => $device->id, 'ended_at' => null],
-            ['started_at' => now(), 'cause' => 'unreachable'],
-        );
+        DB::transaction(function () use ($device): void {
+            $outage = Outage::firstOrCreate(
+                ['device_id' => $device->id, 'ended_at' => null],
+                ['started_at' => now(), 'cause' => 'unreachable'],
+            );
+            $site = $device->site;
+            $state = $site?->state_code;
+            if ($site === null || $state === null || ! isset(NetworkStatus::STATES[$state])) return;
+            // Serialize incident lookup/creation for this site so concurrent device events share one incident.
+            $site = $site->newQuery()->whereKey($site->id)->lockForUpdate()->first();
+            $devices = Device::query()->where('monitored', true)->whereHas('site', fn ($query) => $query->whereKey($site->id))->get();
+            $severity = $devices->isNotEmpty() && $devices->every(fn ($item): bool => $item->status?->value === 'down') ? 'outage' : 'degraded';
+            $incident = StatusIncident::query()->where('site_id', $site->id)->whereNull('resolved_at')->latest('started_at')->first();
+            if ($incident === null) {
+                $incident = StatusIncident::create(['site_id' => $site->id, 'state_code' => $state, 'severity' => $severity, 'status' => 'investigating', 'summary' => $severity === 'outage' ? 'Service outage' : 'Degraded service', 'started_at' => now()]);
+            } else {
+                $incident->update(['severity' => $severity, 'status' => 'investigating']);
+            }
+            if ($outage->status_incident_id !== $incident->id) {
+                $outage->status_incident_id = $incident->id;
+                $outage->save();
+            }
+        });
     }
 
-    /** A device recovered -> close its open outage, stamping the duration. */
     public function close(Device $device): void
     {
         $open = Outage::where('device_id', $device->id)->whereNull('ended_at')->latest('started_at')->first();
-        if ($open === null) {
-            return;
-        }
-
+        if ($open === null) return;
         $open->ended_at = now();
         $open->duration_s = (int) $open->started_at->diffInSeconds($open->ended_at);
         $open->save();
+        $incident = $open->incident;
+        if ($incident !== null && ! $incident->outages()->whereNull('ended_at')->exists()) {
+            $incident->update(['status' => 'resolved', 'resolved_at' => now()]);
+        }
     }
 }

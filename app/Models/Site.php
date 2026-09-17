@@ -20,7 +20,7 @@ class Site extends Model
     use HasFactory;
 
     protected $fillable = [
-        'name', 'kind', 'latitude', 'longitude', 'address', 'external_ref', 'note',
+        'name', 'kind', 'latitude', 'longitude', 'address', 'state_code', 'external_ref', 'note',
     ];
 
     protected $casts = [

@@ -5,6 +5,7 @@ import type { AlertScope, MaintenanceWindow } from '../../../types';
 export interface MaintenanceWindowInput {
     id?: number;
     name: string;
+    description?: string | null;
     starts_at: string;
     ends_at: string;
     scope?: AlertScope;
