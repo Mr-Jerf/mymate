@@ -45,7 +45,7 @@ class NetworkStatusTest extends TestCase
     public function test_admin_can_read_and_update_status_page_settings(): void
     {
         $this->actingAsUser();
-        $this->getJson('/api/settings/status-page')->assertOk()->assertJsonPath('data.brand_name', 'Network Status');
+        $this->getJson('/api/settings/status-page')->assertOk()->assertJsonPath('data.brand_name', 'Network Status')->assertJsonPath('data.logo_url', '/logo.svg')->assertJsonPath('data.favicon_url', '/favicon.svg');
         $this->putJson('/api/settings/status-page', ['brand_name' => 'Example ISP', 'poll_ms' => 60000])->assertOk()->assertJsonPath('data.brand_name', 'Example ISP')->assertJsonPath('data.poll_ms', 60000);
     }
 

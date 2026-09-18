@@ -14,6 +14,8 @@ class StatusPageSettings
         'show_device_counts' => true,
         'allow_subscriptions' => true,
         'public_enabled' => true,
+        'logo_url' => '/logo.svg',
+        'favicon_url' => '/favicon.svg',
         'color_operational' => '#34d399',
         'color_degraded' => '#fbbf24',
         'color_outage' => '#f87171',
@@ -33,6 +35,8 @@ class StatusPageSettings
             'show_device_counts' => (bool) $this->get('show_device_counts'),
             'allow_subscriptions' => (bool) $this->get('allow_subscriptions'),
             'public_enabled' => (bool) $this->get('public_enabled'),
+            'logo_url' => (string) $this->get('logo_url'),
+            'favicon_url' => (string) $this->get('favicon_url'),
             'color_operational' => (string) $this->get('color_operational'),
             'color_degraded' => (string) $this->get('color_degraded'),
             'color_outage' => (string) $this->get('color_outage'),
@@ -50,6 +54,13 @@ class StatusPageSettings
                 Setting::updateOrCreate(['key' => 'status_page.'.$key], ['value' => $values[$key]]);
             }
         }
+        return $this->publicView();
+    }
+
+    public function saveBranding(string $kind, string $dataUri): array
+    {
+        $key = $kind === 'favicon' ? 'favicon_url' : 'logo_url';
+        Setting::updateOrCreate(['key' => 'status_page.'.$key], ['value' => $dataUri]);
         return $this->publicView();
     }
 

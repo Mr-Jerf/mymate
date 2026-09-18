@@ -108,6 +108,7 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
         Route::put('settings/security', [SecuritySettingController::class, 'update'])->name('settings.security.update');
         Route::get('settings/status-page', [StatusPageSettingsController::class, 'show'])->name('settings.status-page.show');
         Route::put('settings/status-page', [StatusPageSettingsController::class, 'update'])->name('settings.status-page.update');
+        Route::post('settings/status-page/branding', [StatusPageSettingsController::class, 'upload'])->name('settings.status-page.branding');
     });
 
     // Is a newer release out? Cached; ?fresh=1 forces a re-check (rate-limited).

@@ -69,6 +69,8 @@
       snapshot = (await response.json()).data;
       const presentation = snapshot.configuration || {};
       applyColors(presentation);
+      const logo = $('status-logo'); if (presentation.logo_url) logo.src = presentation.logo_url;
+      const favicon = $('status-favicon'); if (presentation.favicon_url) favicon.href = presentation.favicon_url;
       $('subscribe-open').hidden = presentation.allow_subscriptions === false || (snapshot.sites || []).length === 0;
       if (presentation.brand_name) { $('brand').textContent = presentation.brand_name; $('footer-brand').textContent = presentation.brand_name; }
       if (presentation.subtitle) $('subtitle').textContent = presentation.subtitle;
