@@ -21,7 +21,7 @@
       return;
     }
     $('sites').innerHTML = sites.map((site, index) => {
-      const history = site.history_7d || [];
+      const history = (site.history_7d || []).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-7);
       const label = siteLabel(site, index);
       const meta = [site.state_name, publicPresentation.show_device_counts && site.monitored_devices !== undefined ? `${site.monitored_devices} monitored` : '', publicPresentation.show_device_counts && site.down_devices !== undefined ? `${site.down_devices} down` : ''].filter(Boolean).join(' · ');
       return `<article class="state-card" id="site-${esc(site.key)}"><div class="state-head"><span class="state-name">${esc(label)}</span><span class="state-status ${site.status}">${stateLabel(site.status)}</span></div><div class="uptime">${site.uptime_60d == null ? '—' : `${Number(site.uptime_60d).toFixed(2)}%`}</div><div class="meta">${esc(meta)}</div><div class="history"><div class="history-title"><span>Last 7 days</span><span>Click a day for details</span></div><div class="bars">${history.map((day) => `<a class="bar ${day.status}" href="#activity" data-site="${esc(site.key)}" data-date="${esc(day.date)}" title="${esc(day.date)}: ${stateLabel(day.status)}" aria-label="${esc(label)} ${esc(day.date)} ${esc(stateLabel(day.status))}"></a>`).join('')}</div><div class="days">${history.map((day) => `<span>${esc(barLabel(day.date))}</span>`).join('')}</div></div></article>`;
@@ -72,14 +72,7 @@
     $('activity-body').innerHTML = incidents + maintenance || '<p>No incidents or maintenance were recorded for this day.</p>';
     $('activity').scrollIntoView({behavior:'smooth',block:'nearest'});
   }
-  function renderFeeds(data) {
-    const incidents = data.status_feed || [];
-    $('incidents').hidden = incidents.length === 0;
-    $('incident-list').innerHTML = incidents.map(historyIncidentHtml).join('');
-    const maintenance = data.maintenance || [];
-    $('maintenance').hidden = maintenance.length === 0;
-    $('maintenance-list').innerHTML = maintenance.map(maintenanceHistoryHtml).join('');
-  }
+
   function applyColors(configuration) {
     const root = document.documentElement;
     const vars = { '--green': configuration.color_operational, '--orange': configuration.color_degraded, '--yellow': configuration.color_monitoring, '--red': configuration.color_outage, '--unknown': configuration.color_unknown, '--purple': configuration.color_maintenance_scheduled, '--blue': configuration.color_maintenance_active, '--maintenance-completed': configuration.color_maintenance_completed };
@@ -105,7 +98,7 @@
       $('subscribe-open').hidden = presentation.allow_subscriptions === false || (snapshot.sites || []).length === 0;
       if (presentation.brand_name) { $('brand').textContent = presentation.brand_name; $('footer-brand').textContent = presentation.brand_name; }
       if (presentation.subtitle) $('subtitle').textContent = presentation.subtitle;
-      renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderFeeds(snapshot); renderHistory(snapshot.history_60d || []);
+      renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderHistory(snapshot.history_60d || []);
       $('last-checked').textContent = `Checked ${new Date().toLocaleTimeString()}`; $('error').hidden = true;
     } catch (error) { $('error').hidden = false; $('error').textContent = `Status data is temporarily unavailable. ${error.message}`; }
   }
