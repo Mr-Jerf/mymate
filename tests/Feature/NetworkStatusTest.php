@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Device;
 use App\Models\Site;
+use App\Models\StatusIncident;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -104,6 +105,21 @@ class NetworkStatusTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'data.sites')
             ->assertJsonMissing(['down_devices' => 1]);
+    }
+
+    public function test_public_visibility_settings_omit_names_and_counts(): void
+    {
+        $this->actingAsUser();
+        $site = Site::factory()->create(['name' => 'Private Label', 'state_code' => 'UT']);
+        Device::factory()->create(['site_id' => $site->id, 'status' => 'up', 'monitored' => true]);
+        StatusIncident::create(['site_id' => $site->id, 'state_code' => 'UT', 'severity' => 'outage', 'status' => 'investigating', 'summary' => 'Service outage', 'started_at' => now()->subMinute()]);
+
+        $this->putJson('/api/settings/status-page', ['show_site_names' => false, 'show_device_counts' => false])->assertOk();
+
+        $response = $this->withHeader('X-Status-Api-Key', 'test-token')->getJson('/api/public/status')->assertOk();
+        $response->assertJsonMissingPath('data.sites.0.name');
+        $response->assertJsonMissingPath('data.sites.0.monitored_devices');
+        $response->assertJsonMissingPath('data.sites.0.down_devices');
     }
 
     public function test_unknown_monitoring_does_not_claim_operational_or_perfect_uptime(): void

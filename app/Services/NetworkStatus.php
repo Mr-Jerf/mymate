@@ -56,7 +56,7 @@ class NetworkStatus
             return $end->greaterThan($start) ? $start->diffInSeconds($end) : 0;
         }));
         $key = hash('sha256', 'public-status-site:'.$site->id);
-        $history = collect(range(6, 0))->map(function (int $daysAgo) use ($site, $now, $historyIncidents, $historyMaintenance): array {
+        $history = collect(range(6, 0))->map(function (int $daysAgo) use ($site, $now, $historyIncidents, $historyMaintenance, $showSiteNames): array {
             $dayStart = $now->copy()->subDays($daysAgo)->startOfDay(); $dayEnd = $dayStart->copy()->endOfDay();
             $incidents = $historyIncidents->filter(fn (StatusIncident $incident): bool => $incident->site_id === $site->id && $incident->started_at <= $dayEnd && ($incident->resolved_at === null || $incident->resolved_at >= $dayStart));
             $maintenance = $historyMaintenance->filter(fn (MaintenanceWindow $window): bool => $window->starts_at <= $dayEnd && $window->ends_at >= $dayStart);
