@@ -75,7 +75,7 @@
   function renderFeeds(data) {
     const incidents = data.status_feed || [];
     $('incidents').hidden = incidents.length === 0;
-    $('incident-list').innerHTML = incidents.map(incidentHtml).join('');
+    $('incident-list').innerHTML = incidents.map(historyIncidentHtml).join('');
     const maintenance = data.maintenance || [];
     $('maintenance').hidden = maintenance.length === 0;
     $('maintenance-list').innerHTML = maintenance.map(maintenanceHistoryHtml).join('');
