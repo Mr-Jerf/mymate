@@ -8,6 +8,7 @@ use App\Http\Requests\StatusIncident\UpdateStatusIncidentRequest;
 use App\Http\Resources\StatusIncidentResource;
 use App\Http\Resources\StatusIncidentUpdateResource;
 use App\Models\StatusIncident;
+use App\Support\StatusNotificationDispatcher;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -48,6 +49,7 @@ class StatusIncidentController extends Controller
             'user_id' => $request->user()->id,
             'message' => $request->validated('message'),
         ]);
+        app(StatusNotificationDispatcher::class)->incidentUpdate($statusIncident->load('site'), $update->id, $update->message);
         return new StatusIncidentUpdateResource($update->load('user'));
     }
 
