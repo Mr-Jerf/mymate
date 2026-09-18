@@ -20,7 +20,7 @@ class ResolveMonitoringIncidents
                     return;
                 }
                 $locked->update(['status' => 'resolved', 'resolved_at' => now(), 'monitoring_until' => null]);
-                app(StatusNotificationDispatcher::class)->incidentResolved($locked);
+                DB::afterCommit(fn () => app(StatusNotificationDispatcher::class)->incidentResolved($locked));
                 $resolved++;
             });
         });

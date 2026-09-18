@@ -8,6 +8,8 @@
   const monthLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'long',year:'numeric'});
   const barLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'});
   let snapshot;
+  let publicPresentation = {show_site_names: true, show_device_counts: true};
+  const siteLabel = (site, index = 0) => publicPresentation.show_site_names && site.name ? site.name : `Public site ${index + 1}`;
 
   function renderOverall(overall) {
     const node = $('overall'); node.className = `overall ${overall.status}`;
@@ -18,15 +20,17 @@
       $('sites').innerHTML = '<p class="empty-state">No public service sites have been configured yet.</p>';
       return;
     }
-    $('sites').innerHTML = sites.map((site) => {
+    $('sites').innerHTML = sites.map((site, index) => {
       const history = site.history_7d || [];
-      return `<article class="state-card" id="site-${esc(site.key)}"><div class="state-head"><span class="state-name">${esc(site.name)}</span><span class="state-status ${site.status}">${stateLabel(site.status)}</span></div><div class="uptime">${site.uptime_60d == null ? '—' : `${Number(site.uptime_60d).toFixed(2)}%`}</div><div class="meta">${esc(site.state_name)} · ${site.monitored_devices} monitored · ${site.down_devices} down</div><div class="history"><div class="history-title"><span>Last 7 days</span><span>Click a day for details</span></div><div class="bars">${history.map((day) => `<a class="bar ${day.status}" href="#activity" data-site="${esc(site.key)}" data-date="${esc(day.date)}" title="${esc(day.date)}: ${stateLabel(day.status)}" aria-label="${esc(site.name)} ${esc(day.date)} ${esc(stateLabel(day.status))}"></a>`).join('')}</div><div class="days">${history.map((day) => `<span>${esc(barLabel(day.date))}</span>`).join('')}</div></div></article>`;
+      const label = siteLabel(site, index);
+      const meta = [site.state_name, publicPresentation.show_device_counts && site.monitored_devices !== undefined ? `${site.monitored_devices} monitored` : '', publicPresentation.show_device_counts && site.down_devices !== undefined ? `${site.down_devices} down` : ''].filter(Boolean).join(' · ');
+      return `<article class="state-card" id="site-${esc(site.key)}"><div class="state-head"><span class="state-name">${esc(label)}</span><span class="state-status ${site.status}">${stateLabel(site.status)}</span></div><div class="uptime">${site.uptime_60d == null ? '—' : `${Number(site.uptime_60d).toFixed(2)}%`}</div><div class="meta">${esc(meta)}</div><div class="history"><div class="history-title"><span>Last 7 days</span><span>Click a day for details</span></div><div class="bars">${history.map((day) => `<a class="bar ${day.status}" href="#activity" data-site="${esc(site.key)}" data-date="${esc(day.date)}" title="${esc(day.date)}: ${stateLabel(day.status)}" aria-label="${esc(label)} ${esc(day.date)} ${esc(stateLabel(day.status))}"></a>`).join('')}</div><div class="days">${history.map((day) => `<span>${esc(barLabel(day.date))}</span>`).join('')}</div></div></article>`;
     }).join('');
     document.querySelectorAll('.bar').forEach((bar) => bar.addEventListener('click', (event) => { event.preventDefault(); showActivity(bar.dataset.site, bar.dataset.date); }));
   }
   function openSubscribe() {
     const form = $('subscribe-form'); const select = $('subscribe-site');
-    select.innerHTML = (snapshot.sites || []).map((site) => `<option value="${esc(site.key)}">${esc(site.name)}</option>`).join('');
+    select.innerHTML = (snapshot.sites || []).map((site, index) => `<option value="${esc(site.key)}">${esc(siteLabel(site, index))}</option>`).join('');
     form.reset(); $('subscribe-message').textContent = ''; $('subscribe-modal').hidden = false; $('subscribe-email').focus();
   }
   async function submitSubscription(event) {
@@ -50,7 +54,7 @@
     const day = site?.history_7d?.find((d) => d.date === date);
     if (!site || !day) return;
     $('activity').hidden = false;
-    $('activity-title').textContent = `${site.name} · Activity for ${barLabel(date)}`;
+    $('activity-title').textContent = `${siteLabel(site)} · Activity for ${barLabel(date)}`;
     const incidents = (day.incidents || []).map(incidentHtml).join('');
     const maintenance = (day.maintenance || []).map((m) => `<details class="event ${esc(m.status || '')}"><summary><strong>${esc(m.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(m.starts_at))}</span></summary><p>${esc(m.description || 'Scheduled maintenance')}</p><p>${esc(fmt(m.starts_at))} – ${esc(fmt(m.ends_at))}</p></details>`).join('');
     $('activity-body').innerHTML = incidents + maintenance || '<p>No incidents or maintenance were recorded for this day.</p>';
@@ -81,6 +85,7 @@
       if (!response.ok) throw new Error(`Status API returned ${response.status}`);
       snapshot = (await response.json()).data;
       const presentation = snapshot.configuration || {};
+      publicPresentation = presentation;
       applyColors(presentation);
       const logo = $('status-logo'); logo.onerror = () => { logo.onerror = null; logo.src = '/logo.svg'; }; if (presentation.logo_url) logo.src = presentation.logo_url;
       const favicon = $('status-favicon'); favicon.onerror = () => { favicon.onerror = null; favicon.href = '/favicon.svg'; }; if (presentation.favicon_url) favicon.href = presentation.favicon_url;
