@@ -44,16 +44,25 @@ class RecordOutage
 
     public function close(Device $device): void
     {
-        $open = Outage::where('device_id', $device->id)->whereNull('ended_at')->latest('started_at')->first();
-        if ($open === null) return;
-        $open->ended_at = now();
-        $open->duration_s = (int) $open->started_at->diffInSeconds($open->ended_at);
-        $open->save();
-        $incident = $open->incident;
-        if ($incident !== null && ! $incident->outages()->whereNull('ended_at')->exists()) {
-            $grace = app(\App\Support\StatusPageSettings::class)->publicView()['monitoring_grace_minutes'];
-            $incident->update(['status' => 'monitoring', 'monitoring_started_at' => now(), 'monitoring_until' => now()->addMinutes($grace), 'resolved_at' => null]);
-            app(StatusNotificationDispatcher::class)->incidentMonitoring($incident);
-        }
+        DB::transaction(function () use ($device): void {
+            $candidate = Outage::where('device_id', $device->id)->whereNull('ended_at')->latest('started_at')->first();
+            if ($candidate === null) return;
+
+            // Lock the incident first, matching ResolveMonitoringIncidents, so a
+            // resolver cannot promote this incident while the outage is closing.
+            $incident = $candidate->status_incident_id === null
+                ? null
+                : StatusIncident::query()->whereKey($candidate->status_incident_id)->lockForUpdate()->first();
+            $open = Outage::query()->whereKey($candidate->id)->lockForUpdate()->first();
+            if ($open === null || $open->ended_at !== null) return;
+            $open->ended_at = now();
+            $open->duration_s = (int) $open->started_at->diffInSeconds($open->ended_at);
+            $open->save();
+            if ($incident !== null && ! $incident->outages()->whereNull('ended_at')->exists()) {
+                $grace = app(\App\Support\StatusPageSettings::class)->publicView()['monitoring_grace_minutes'];
+                $incident->update(['status' => 'monitoring', 'monitoring_started_at' => now(), 'monitoring_until' => now()->addMinutes($grace), 'resolved_at' => null]);
+                app(StatusNotificationDispatcher::class)->incidentMonitoring($incident);
+            }
+        });
     }
 }
