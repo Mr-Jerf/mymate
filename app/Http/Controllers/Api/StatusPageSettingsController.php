@@ -23,6 +23,10 @@ class StatusPageSettingsController extends Controller
     public function upload(UploadStatusPageBrandingRequest $request, StatusPageSettings $settings): JsonResponse
     {
         $file = $request->file('asset');
+        $maxBytes = $request->validated('kind') === 'favicon' ? 64 * 1024 : 256 * 1024;
+        abort_if($file === null || $file->getSize() > $maxBytes, 422);
+        $dimensions = @getimagesize($file->getRealPath());
+        abort_unless(is_array($dimensions) && ($dimensions[0] ?? 0) > 0 && ($dimensions[1] ?? 0) > 0 && $dimensions[0] <= 2048 && $dimensions[1] <= 2048, 422);
         $mime = $file->getMimeType();
         abort_unless(is_string($mime) && in_array($mime, ['image/png', 'image/jpeg', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon'], true), 422);
         $dataUri = 'data:'.$mime.';base64,'.base64_encode((string) file_get_contents($file->getRealPath()));

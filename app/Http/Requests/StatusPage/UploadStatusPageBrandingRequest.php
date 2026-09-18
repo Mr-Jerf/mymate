@@ -11,7 +11,7 @@ class UploadStatusPageBrandingRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'asset' => ['required', 'file', 'max:512', 'mimetypes:image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon'],
+            'asset' => ['required', 'file', 'max:256', 'mimetypes:image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon'],
             'kind' => ['required', 'in:logo,favicon'],
         ];
     }
