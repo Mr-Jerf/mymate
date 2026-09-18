@@ -28,7 +28,10 @@ class StatusPageSettingsController extends Controller
         $dimensions = @getimagesize($file->getRealPath());
         abort_unless(is_array($dimensions) && ($dimensions[0] ?? 0) > 0 && ($dimensions[1] ?? 0) > 0 && $dimensions[0] <= 2048 && $dimensions[1] <= 2048, 422);
         $mime = $file->getMimeType();
-        abort_unless(is_string($mime) && in_array($mime, ['image/png', 'image/jpeg', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon'], true), 422);
+        $allowedMimes = $request->validated('kind') === 'favicon'
+            ? ['image/png', 'image/webp', 'image/x-icon', 'image/vnd.microsoft.icon']
+            : ['image/png', 'image/jpeg', 'image/webp'];
+        abort_unless(is_string($mime) && in_array($mime, $allowedMimes, true), 422);
         $dataUri = 'data:'.$mime.';base64,'.base64_encode((string) file_get_contents($file->getRealPath()));
         return response()->json(['data' => $settings->saveBranding($request->validated('kind'), $dataUri)]);
     }
