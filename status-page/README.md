@@ -22,7 +22,18 @@ docker compose up --build
 
 Open `http://127.0.0.1:8788`.
 
-## MyMate setup
+## Admin-managed configuration
+
+Administrators can manage the safe public presentation settings under **MyMate → Settings → Network status**. These include the display name, subtitle, polling interval, public enable/disable switch, aggregate display options, and subscription eligibility.
+
+The private connection token is intentionally not managed as a readable UI field. For Docker deployments, enter it only in a protected host environment file:
+
+```dotenv
+STATUS_API_TOKEN=replace-with-a-random-64-character-hex-token
+MYMATE_STATUS_TOKEN=replace-with-the-same-token
+```
+
+Use owner-only permissions (`chmod 600`) and load the file through Compose `env_file`. Never place either variable in browser configuration, `config.js`, HTML, Git, or a public API response. The status proxy reports only safe configuration values through the authenticated aggregate response.
 
 For a separate HTTPS origin, add the exact status-page origin to MyMate's protected configuration:
 

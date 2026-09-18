@@ -51,6 +51,9 @@
       const response = await fetch(`${cfg.apiBaseUrl.replace(/\/$/,'')}${cfg.apiPath}`, {headers:{Accept:'application/json'}});
       if (!response.ok) throw new Error(`Status API returned ${response.status}`);
       snapshot = (await response.json()).data;
+      const presentation = snapshot.configuration || {};
+      if (presentation.brand_name) { $('brand').textContent = presentation.brand_name; $('footer-brand').textContent = presentation.brand_name; }
+      if (presentation.subtitle) $('subtitle').textContent = presentation.subtitle;
       renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderFeeds(snapshot);
       $('last-checked').textContent = `Checked ${new Date().toLocaleTimeString()}`; $('error').hidden = true;
     } catch (error) { $('error').hidden = false; $('error').textContent = `Status data is temporarily unavailable. ${error.message}`; }

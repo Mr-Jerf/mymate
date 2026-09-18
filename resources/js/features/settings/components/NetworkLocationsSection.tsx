@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MapPin, Plus, X } from '@phosphor-icons/react';
 import { apiClient } from '../../../lib/apiClient';
 import { pushToast } from '../../../lib/toast';
@@ -22,6 +22,12 @@ type Site = { id: number; name: string; state_code: string | null; kind?: string
 
 type NewSite = { name: string; kind: 'tower' | 'cabinet' | 'pop' | 'other'; state_code: string; address: string };
 
+type StatusPageSettings = { brand_name: string; subtitle: string; poll_ms: number; show_site_names: boolean; show_device_counts: boolean; allow_subscriptions: boolean; public_enabled: boolean };
+
+function useStatusPageSettings() {
+    return useQuery({ queryKey: ['status-page-settings'], queryFn: async (): Promise<StatusPageSettings> => (await apiClient.get<{ data: StatusPageSettings }>('/settings/status-page')).data.data });
+}
+
 function useSites() {
     return useQuery({
         queryKey: ['sites'],
@@ -32,6 +38,14 @@ function useSites() {
 export function NetworkLocationsSection() {
     const queryClient = useQueryClient();
     const { data: sites, isLoading } = useSites();
+    const { data: statusSettings } = useStatusPageSettings();
+    const [statusDraft, setStatusDraft] = useState<StatusPageSettings | null>(null);
+    useEffect(() => { if (statusSettings) setStatusDraft(statusSettings); }, [statusSettings]);
+    const saveStatus = useMutation({
+        mutationFn: async (input: StatusPageSettings) => (await apiClient.put('/settings/status-page', input)).data,
+        onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['status-page-settings'] }); pushToast({ title: 'Status page settings saved', tone: 'up' }); },
+        onError: () => pushToast({ title: "Couldn't save status page settings", tone: 'down' }),
+    });
     const [showCreate, setShowCreate] = useState(false);
     const [form, setForm] = useState<NewSite>({ name: '', kind: 'other', state_code: '', address: '' });
     const create = useMutation({
@@ -59,7 +73,18 @@ export function NetworkLocationsSection() {
     });
 
     return (
-        <section className="min-w-0 rounded-2xl bg-white/[0.02] p-5 ring-1 ring-white/[0.06]">
+        <section className="space-y-6">
+            {statusDraft && <section className="min-w-0 rounded-2xl bg-white/[0.02] p-5 ring-1 ring-white/[0.06]">
+                <div className="mb-4"><h2 className="text-sm font-bold text-white">Public status page</h2><p className="text-xs text-white/40">Configure safe presentation settings. The private API token remains on the deployment host.</p></div>
+                <div className="grid gap-2.5 md:grid-cols-2">
+                    <input className="rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-white ring-1 ring-white/10 outline-none" value={statusDraft.brand_name} onChange={(e) => setStatusDraft({ ...statusDraft, brand_name: e.target.value })} placeholder="Business name" />
+                    <input className="rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-white ring-1 ring-white/10 outline-none" value={statusDraft.subtitle} onChange={(e) => setStatusDraft({ ...statusDraft, subtitle: e.target.value })} placeholder="Subtitle" />
+                    <label className="flex items-center gap-2 text-xs text-white/70"><span>Refresh interval (ms)</span><input className="w-32 rounded-lg bg-white/[0.04] px-3 py-2 text-sm text-white ring-1 ring-white/10" type="number" min={10000} max={300000} value={statusDraft.poll_ms} onChange={(e) => setStatusDraft({ ...statusDraft, poll_ms: Number(e.target.value) })} /></label>
+                    {([['public_enabled', 'Public page enabled'], ['show_site_names', 'Show site names'], ['show_device_counts', 'Show aggregate device counts'], ['allow_subscriptions', 'Allow customer subscriptions']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={statusDraft[key]} onChange={(e) => setStatusDraft({ ...statusDraft, [key]: e.target.checked })} />{label}</label>)}
+                </div>
+                <div className="mt-4 flex justify-end"><button type="button" disabled={saveStatus.isPending} onClick={() => saveStatus.mutate(statusDraft)} className="rounded-full bg-emerald-500 px-4 py-1.5 text-xs font-semibold text-emerald-950 disabled:opacity-40">{saveStatus.isPending ? 'Saving...' : 'Save status page settings'}</button></div>
+            </section>}
+            <section className="min-w-0 rounded-2xl bg-white/[0.02] p-5 ring-1 ring-white/[0.06]">
             <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                     <MapPin weight="light" className="h-4 w-4 text-white/40" />
@@ -111,5 +136,6 @@ export function NetworkLocationsSection() {
             )}
             <p className="mt-4 text-[11px] leading-relaxed text-white/30">Unassigned sites are excluded from the public state rollup until an administrator assigns them.</p>
         </section>
-    );
+        </section>
+        );
 }

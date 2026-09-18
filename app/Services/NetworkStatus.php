@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\MaintenanceWindow;
 use App\Models\Site;
 use App\Models\StatusIncident;
+use App\Support\StatusPageSettings;
 
 class NetworkStatus
 {
@@ -33,7 +34,7 @@ class NetworkStatus
             ->with(['site', 'updates'])->orderByDesc('started_at')->limit(100)->get()
             ->map(fn (StatusIncident $incident): array => $this->incidentPayload($incident))->values()->all();
         $overall = $this->overallStatus($publicSites);
-        return ['overall' => ['status' => $overall, 'label' => match ($overall) { 'operational'=>'All systems operational', 'degraded'=>'Some systems are experiencing issues', 'outage'=>'A network outage is in progress', default=>'System status is currently unavailable' }], 'sites' => $publicSites, 'maintenance' => $maintenance, 'status_feed' => $statusFeed, 'generated_at' => $now->toISOString()];
+        return ['overall' => ['status' => $overall, 'label' => match ($overall) { 'operational'=>'All systems operational', 'degraded'=>'Some systems are experiencing issues', 'outage'=>'A network outage is in progress', default=>'System status is currently unavailable' }], 'sites' => $publicSites, 'configuration' => app(StatusPageSettings::class)->publicView(), 'maintenance' => $maintenance, 'status_feed' => $statusFeed, 'generated_at' => $now->toISOString()];
     }
 
     private function siteSnapshot(Site $site, $windowStart, int $windowSeconds, $now, $historyIncidents, $historyMaintenance): array

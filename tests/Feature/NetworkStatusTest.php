@@ -42,6 +42,13 @@ class NetworkStatusTest extends TestCase
         $this->patchJson("/api/sites/{$site->id}", ['state_code' => 'UT'])->assertForbidden();
     }
 
+    public function test_admin_can_read_and_update_status_page_settings(): void
+    {
+        $this->actingAsUser();
+        $this->getJson('/api/settings/status-page')->assertOk()->assertJsonPath('data.brand_name', 'Network Status');
+        $this->putJson('/api/settings/status-page', ['brand_name' => 'Example ISP', 'poll_ms' => 60000])->assertOk()->assertJsonPath('data.brand_name', 'Example ISP')->assertJsonPath('data.poll_ms', 60000);
+    }
+
     public function test_public_status_requires_the_status_api_token(): void
     {
         $this->getJson('/api/public/status')->assertUnauthorized();

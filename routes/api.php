@@ -44,6 +44,7 @@ use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SubnetController;
 use App\Http\Controllers\Api\SystemStatusController;
 use App\Http\Controllers\Api\StatusIncidentController;
+use App\Http\Controllers\Api\StatusPageSettingsController;
 use App\Http\Controllers\Api\Tools\ToolsController;
 use App\Http\Controllers\Api\TraceController;
 use App\Http\Controllers\Api\UpdateCheckController;
@@ -101,6 +102,8 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     Route::middleware('admin')->group(function (): void {
         Route::get('settings/security', [SecuritySettingController::class, 'show'])->name('settings.security.show');
         Route::put('settings/security', [SecuritySettingController::class, 'update'])->name('settings.security.update');
+        Route::get('settings/status-page', [StatusPageSettingsController::class, 'show'])->name('settings.status-page.show');
+        Route::put('settings/status-page', [StatusPageSettingsController::class, 'update'])->name('settings.status-page.update');
     });
 
     // Is a newer release out? Cached; ?fresh=1 forces a re-check (rate-limited).
