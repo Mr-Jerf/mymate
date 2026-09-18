@@ -14,6 +14,13 @@ class StatusPageSettings
         'show_device_counts' => true,
         'allow_subscriptions' => true,
         'public_enabled' => true,
+        'color_operational' => '#34d399',
+        'color_degraded' => '#fbbf24',
+        'color_outage' => '#f87171',
+        'color_unknown' => '#94a3b8',
+        'color_maintenance_scheduled' => '#a78bfa',
+        'color_maintenance_active' => '#60a5fa',
+        'color_maintenance_completed' => '#34d399',
     ];
 
     public function publicView(): array
@@ -26,6 +33,13 @@ class StatusPageSettings
             'show_device_counts' => (bool) $this->get('show_device_counts'),
             'allow_subscriptions' => (bool) $this->get('allow_subscriptions'),
             'public_enabled' => (bool) $this->get('public_enabled'),
+            'color_operational' => (string) $this->get('color_operational'),
+            'color_degraded' => (string) $this->get('color_degraded'),
+            'color_outage' => (string) $this->get('color_outage'),
+            'color_unknown' => (string) $this->get('color_unknown'),
+            'color_maintenance_scheduled' => (string) $this->get('color_maintenance_scheduled'),
+            'color_maintenance_active' => (string) $this->get('color_maintenance_active'),
+            'color_maintenance_completed' => (string) $this->get('color_maintenance_completed'),
         ];
     }
 

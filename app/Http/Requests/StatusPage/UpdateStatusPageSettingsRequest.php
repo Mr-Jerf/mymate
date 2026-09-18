@@ -18,6 +18,13 @@ class UpdateStatusPageSettingsRequest extends FormRequest
             'show_device_counts' => ['sometimes', 'boolean'],
             'allow_subscriptions' => ['sometimes', 'boolean'],
             'public_enabled' => ['sometimes', 'boolean'],
+            'color_operational' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'color_degraded' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'color_outage' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'color_unknown' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'color_maintenance_scheduled' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'color_maintenance_active' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'color_maintenance_completed' => ['sometimes', 'regex:/^#[0-9a-fA-F]{6}$/'],
         ];
     }
 }

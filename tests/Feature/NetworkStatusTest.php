@@ -49,6 +49,20 @@ class NetworkStatusTest extends TestCase
         $this->putJson('/api/settings/status-page', ['brand_name' => 'Example ISP', 'poll_ms' => 60000])->assertOk()->assertJsonPath('data.brand_name', 'Example ISP')->assertJsonPath('data.poll_ms', 60000);
     }
 
+    public function test_status_page_settings_include_custom_public_colors(): void
+    {
+        $this->actingAsUser();
+
+        $this->putJson('/api/settings/status-page', [
+            'color_outage' => '#ff1234',
+            'color_degraded' => '#ffaa00',
+            'color_maintenance_active' => '#2244ff',
+        ])->assertOk()
+            ->assertJsonPath('data.color_outage', '#ff1234')
+            ->assertJsonPath('data.color_degraded', '#ffaa00')
+            ->assertJsonPath('data.color_maintenance_active', '#2244ff');
+    }
+
     public function test_public_status_requires_the_status_api_token(): void
     {
         $this->getJson('/api/public/status')->assertUnauthorized();

@@ -18,15 +18,20 @@
     }
     $('sites').innerHTML = sites.map((site) => {
       const history = site.history_7d || [];
-      return `<article class="state-card" id="site-${esc(site.key)}"><div class="state-head"><span class="state-name">${esc(site.name)}</span><span class="state-status ${site.status}">${stateLabel(site.status)}</span></div><div class="uptime">${site.uptime_60d == null ? '—' : `${Number(site.uptime_60d).toFixed(2)}%`}</div><div class="meta">${esc(site.state_name)} · ${site.monitored_devices} monitored · ${site.down_devices} down</div><div class="history"><div class="history-title"><span>Last 7 days</span><span>Click a day for details</span></div><div class="bars">${history.map((day) => `<a class="bar ${day.status}" href="#activity" data-site="${esc(site.key)}" data-date="${esc(day.date)}" title="${esc(day.date)}: ${stateLabel(day.status)}" aria-label="${esc(site.name)} ${esc(day.date)} ${esc(stateLabel(day.status))}"></a>`).join('')}</div><div class="days">${history.map((day) => `<span>${esc(barLabel(day.date))}</span>`).join('')}<details class="subscribe"><summary>Subscribe to site updates</summary><form class="subscribe-form" data-site="${esc(site.key)}"><input type="email" name="email" required placeholder="Email address" aria-label="Email address for ${esc(site.name)}"><label><input type="checkbox" name="outage" checked> Outages</label><label><input type="checkbox" name="degraded" checked> Degraded</label><label><input type="checkbox" name="updates" checked> Updates</label><label><input type="checkbox" name="resolved" checked> Restored</label><button type="submit">Subscribe</button><small class="subscribe-message" role="status"></small></form></details></article>`;
+      return `<article class="state-card" id="site-${esc(site.key)}"><div class="state-head"><span class="state-name">${esc(site.name)}</span><span class="state-status ${site.status}">${stateLabel(site.status)}</span></div><div class="uptime">${site.uptime_60d == null ? '—' : `${Number(site.uptime_60d).toFixed(2)}%`}</div><div class="meta">${esc(site.state_name)} · ${site.monitored_devices} monitored · ${site.down_devices} down</div><div class="history"><div class="history-title"><span>Last 7 days</span><span>Click a day for details</span></div><div class="bars">${history.map((day) => `<a class="bar ${day.status}" href="#activity" data-site="${esc(site.key)}" data-date="${esc(day.date)}" title="${esc(day.date)}: ${stateLabel(day.status)}" aria-label="${esc(site.name)} ${esc(day.date)} ${esc(stateLabel(day.status))}"></a>`).join('')}</div><div class="days">${history.map((day) => `<span>${esc(barLabel(day.date))}</span>`).join('')}</div></div></article>`;
     }).join('');
     document.querySelectorAll('.bar').forEach((bar) => bar.addEventListener('click', (event) => { event.preventDefault(); showActivity(bar.dataset.site, bar.dataset.date); }));
-    document.querySelectorAll('.subscribe-form').forEach((form) => form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const f = new FormData(form); const message = form.querySelector('.subscribe-message');
-      const preferences = {outage:f.has('outage'), degraded:f.has('degraded'), updates:f.has('updates'), resolved:f.has('resolved'), maintenance:false};
-      try { const response = await fetch('/api/public/status-subscriptions', {method:'POST', headers:{'Content-Type':'application/json',Accept:'application/json'}, body:JSON.stringify({site_key:form.dataset.site,email:f.get('email'),preferences})}); if (!response.ok && response.status !== 202) throw new Error(); message.textContent = 'If eligible, a confirmation email will be sent.'; form.reset(); } catch (_) { message.textContent = 'We could not process that request right now.'; }
-    }));
+  }
+  function openSubscribe() {
+    const form = $('subscribe-form'); const select = $('subscribe-site');
+    select.innerHTML = (snapshot.sites || []).map((site) => `<option value="${esc(site.key)}">${esc(site.name)}</option>`).join('');
+    form.reset(); $('subscribe-message').textContent = ''; $('subscribe-modal').hidden = false; $('subscribe-email').focus();
+  }
+  async function submitSubscription(event) {
+    event.preventDefault();
+    const form = event.currentTarget; const f = new FormData(form); const message = $('subscribe-message');
+    const preferences = {outage:f.has('outage'), degraded:f.has('degraded'), updates:f.has('updates'), resolved:f.has('resolved'), maintenance:f.has('maintenance')};
+    try { const response = await fetch('/api/public/status-subscriptions', {method:'POST', headers:{'Content-Type':'application/json',Accept:'application/json'}, body:JSON.stringify({site_key:f.get('site_key'),email:f.get('email'),preferences})}); if (!response.ok && response.status !== 202) throw new Error(); message.textContent = 'If eligible, a confirmation email will be sent.'; form.reset(); } catch (_) { message.textContent = 'We could not process that request right now.'; }
   }
   function incidentHtml(incident) {
     const cls = `incident-${incident.severity} incident-${incident.status}`;
@@ -40,7 +45,7 @@
     $('activity').hidden = false;
     $('activity-title').textContent = `${site.name} · Activity for ${barLabel(date)}`;
     const incidents = (day.incidents || []).map(incidentHtml).join('');
-    const maintenance = (day.maintenance || []).map((m) => `<details class="event"><summary><strong>${esc(m.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(m.starts_at))}</span></summary><p>${esc(m.description || 'Scheduled maintenance')}</p><p>${esc(fmt(m.starts_at))} – ${esc(fmt(m.ends_at))}</p></details>`).join('');
+    const maintenance = (day.maintenance || []).map((m) => `<details class="event ${esc(m.status || '')}"><summary><strong>${esc(m.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(m.starts_at))}</span></summary><p>${esc(m.description || 'Scheduled maintenance')}</p><p>${esc(fmt(m.starts_at))} – ${esc(fmt(m.ends_at))}</p></details>`).join('');
     $('activity-body').innerHTML = incidents + maintenance || '<p>No incidents or maintenance were recorded for this day.</p>';
     $('activity').scrollIntoView({behavior:'smooth',block:'nearest'});
   }
@@ -52,12 +57,19 @@
     $('maintenance').hidden = maintenance.length === 0;
     $('maintenance-list').innerHTML = maintenance.map((m) => `<details class="event ${m.status}"><summary><strong>${esc(m.overview)}</strong><span class="tag">${esc(m.status)} · ${esc(fmt(m.starts_at))}</span></summary><p>${esc(m.description || '')}</p><p>${esc(fmt(m.starts_at))} – ${esc(fmt(m.ends_at))}</p></details>`).join('');
   }
+  function applyColors(configuration) {
+    const root = document.documentElement;
+    const vars = { '--green': configuration.color_operational, '--yellow': configuration.color_degraded, '--red': configuration.color_outage, '--unknown': configuration.color_unknown, '--purple': configuration.color_maintenance_scheduled, '--blue': configuration.color_maintenance_active, '--maintenance-completed': configuration.color_maintenance_completed };
+    Object.entries(vars).forEach(([name, value]) => { if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) root.style.setProperty(name, value); });
+  }
   async function refresh() {
     try {
       const response = await fetch(`${cfg.apiBaseUrl.replace(/\/$/,'')}${cfg.apiPath}`, {headers:{Accept:'application/json'}});
       if (!response.ok) throw new Error(`Status API returned ${response.status}`);
       snapshot = (await response.json()).data;
       const presentation = snapshot.configuration || {};
+      applyColors(presentation);
+      $('subscribe-open').hidden = presentation.allow_subscriptions === false || (snapshot.sites || []).length === 0;
       if (presentation.brand_name) { $('brand').textContent = presentation.brand_name; $('footer-brand').textContent = presentation.brand_name; }
       if (presentation.subtitle) $('subtitle').textContent = presentation.subtitle;
       renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderFeeds(snapshot);
@@ -65,5 +77,8 @@
     } catch (error) { $('error').hidden = false; $('error').textContent = `Status data is temporarily unavailable. ${error.message}`; }
   }
   $('brand').textContent = cfg.brandName; $('subtitle').textContent = cfg.subtitle; $('footer-brand').textContent = cfg.brandName;
+  $('subscribe-open').addEventListener('click', openSubscribe);
+  $('subscribe-close').addEventListener('click', () => { $('subscribe-modal').hidden = true; });
+  $('subscribe-form').addEventListener('submit', submitSubscription);
   refresh(); setInterval(refresh, Number(cfg.pollMs) || 30000);
 })();

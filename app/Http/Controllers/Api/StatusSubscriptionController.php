@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Illuminate\Database\QueryException;
 use App\Support\MailSettings;
 
 class StatusSubscriptionController extends Controller
@@ -23,12 +24,20 @@ class StatusSubscriptionController extends Controller
         if ($site === null) return response()->json(['message' => 'If eligible, a confirmation email will be sent.'], 202);
         $email = strtolower(trim($data['email']));
         $emailHash = hash_hmac('sha256', $email, (string) config('app.key'));
+        $existing = StatusSubscription::where('email_hash', $emailHash)->first();
+        if ($existing !== null && $existing->site_id !== $site->id) {
+            return response()->json(['message' => 'If eligible, a confirmation email will be sent.'], 202);
+        }
         $verification = Str::random(64);
         $unsubscribe = Str::random(64);
-        $subscription = StatusSubscription::updateOrCreate(
-            ['site_id' => $site->id, 'email_hash' => $emailHash],
-            ['email_ciphertext' => Crypt::encryptString($email), 'verification_hash' => hash('sha256', $verification), 'unsubscribe_hash' => hash('sha256', $unsubscribe), 'preferences' => $data['preferences'] ?? ['outage' => true, 'degraded' => true, 'updates' => true, 'resolved' => true, 'maintenance' => true], 'unsubscribed_at' => null],
-        );
+        try {
+            $subscription = StatusSubscription::updateOrCreate(
+                ['site_id' => $site->id, 'email_hash' => $emailHash],
+                ['email_ciphertext' => Crypt::encryptString($email), 'verification_hash' => hash('sha256', $verification), 'unsubscribe_hash' => hash('sha256', $unsubscribe), 'preferences' => $data['preferences'] ?? ['outage' => true, 'degraded' => true, 'updates' => true, 'resolved' => true, 'maintenance' => true], 'unsubscribed_at' => null],
+            );
+        } catch (QueryException) {
+            return response()->json(['message' => 'If eligible, a confirmation email will be sent.'], 202);
+        }
         try {
             $mailer = app(MailSettings::class)->apply();
             Mail::mailer($mailer)->raw("Confirm your My Mate status subscription for {$site->name}: ".url('/api/public/status-subscriptions/verify/'.$verification)."\n\nUnsubscribe: ".url('/api/public/status-subscriptions/unsubscribe/'.$unsubscribe), fn ($message) => $message->to($email)->subject('Confirm My Mate status notifications'));
