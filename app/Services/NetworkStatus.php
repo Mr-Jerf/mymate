@@ -24,17 +24,21 @@ class NetworkStatus
                 $outages->where('started_at', '<', $now)->where(fn ($q) => $q->whereNull('ended_at')->orWhere('ended_at', '>', $windowStart));
             }]);
         }])->orderBy('name')->get();
-        $historyIncidents = StatusIncident::query()->whereNotNull('site_id')->where('started_at', '<', $now)
-            ->where(fn ($q) => $q->whereNull('resolved_at')->orWhere('resolved_at', '>', $now->copy()->subDays(7)))->with(['site', 'updates'])->get();
-        $historyMaintenance = $this->maintenance($now->copy()->subDays(7), $now);
+        $historyIncidents = StatusIncident::query()->whereNotNull('site_id')->whereHas('site', fn ($query) => $query->whereIn('state_code', array_keys(self::STATES)))->where('started_at', '<', $now)
+            ->where(function ($q) use ($now): void {
+                $q->where('started_at', '>', $now->copy()->subDays(60))
+                    ->orWhere(fn ($nested) => $nested->whereNull('resolved_at')->orWhere('resolved_at', '>', $now->copy()->subDays(60)));
+            })->with(['site', 'updates'])->get();
+        $historyMaintenance = $this->maintenance($now->copy()->subDays(60), $now);
         $publicSites = $sites->map(fn (Site $site): array => $this->siteSnapshot($site, $windowStart, $windowSeconds, $now, $historyIncidents, $historyMaintenance))->values()->all();
         $maintenance = $this->maintenance($now->copy()->subDays(30), $now->copy()->addDays(30))->map(fn (MaintenanceWindow $window): array => $this->maintenancePayload($window, $now))->values()->all();
         $statusFeed = StatusIncident::query()->whereNotNull('site_id')->whereHas('site', fn ($query) => $query->whereIn('state_code', array_keys(self::STATES)))->where('started_at', '<', $now)
             ->where(fn ($q) => $q->whereNull('resolved_at')->orWhere('resolved_at', '>', $now->copy()->subDays(30)))
             ->with(['site', 'updates'])->orderByDesc('started_at')->limit(100)->get()
             ->map(fn (StatusIncident $incident): array => $this->incidentPayload($incident))->values()->all();
+        $history60 = $this->historyPayload($historyIncidents, $historyMaintenance, $now, $windowStart);
         $overall = $this->overallStatus($publicSites);
-        return ['overall' => ['status' => $overall, 'label' => match ($overall) { 'operational'=>'All systems operational', 'degraded'=>'Some systems are experiencing issues', 'outage'=>'A network outage is in progress', default=>'System status is currently unavailable' }], 'sites' => $publicSites, 'configuration' => app(StatusPageSettings::class)->publicView(), 'maintenance' => $maintenance, 'status_feed' => $statusFeed, 'generated_at' => $now->toISOString()];
+        return ['overall' => ['status' => $overall, 'label' => match ($overall) { 'operational'=>'All systems operational', 'degraded'=>'Some systems are experiencing issues', 'outage'=>'A network outage is in progress', default=>'System status is currently unavailable' }], 'sites' => $publicSites, 'configuration' => app(StatusPageSettings::class)->publicView(), 'maintenance' => $maintenance, 'status_feed' => $statusFeed, 'history_60d' => $history60, 'generated_at' => $now->toISOString()];
     }
 
     private function siteSnapshot(Site $site, $windowStart, int $windowSeconds, $now, $historyIncidents, $historyMaintenance): array
@@ -72,6 +76,14 @@ class NetworkStatus
         return $statuses->contains('outage') ? 'outage' : ($statuses->contains('degraded') ? 'degraded' : ($statuses->contains('unknown') ? 'unknown' : 'operational'));
     }
 
+    private function historyPayload($incidents, $maintenance, $now, $windowStart): array
+    {
+        $events = $incidents->map(fn (StatusIncident $incident): array => array_merge($this->incidentPayload($incident), ['event_type' => 'incident', 'date' => ($incident->started_at?->greaterThan($windowStart) ? $incident->started_at : $windowStart)?->toDateString()]))
+            ->merge($maintenance->map(fn (MaintenanceWindow $window): array => array_merge($this->maintenancePayload($window, $now), ['event_type' => 'maintenance', 'date' => ($window->starts_at?->greaterThan($windowStart) ? $window->starts_at : $windowStart)?->toDateString(), 'site' => 'All sites'])))
+            ->sortByDesc('date')->values()->all();
+        return $events;
+    }
+
     private function maintenance($from, $to)
     {
         return MaintenanceWindow::query()->where('enabled', true)->where('ends_at', '>', $from)->where('starts_at', '<=', $to)->orderBy('starts_at')->get()->filter(fn (MaintenanceWindow $w): bool => $w->scope === null || (is_array($w->scope) && ($w->scope['type'] ?? null) === 'all'))->take(100);
@@ -84,6 +96,6 @@ class NetworkStatus
 
     private function incidentPayload(StatusIncident $incident): array
     {
-        return ['incident_id'=>$incident->id, 'site'=>$incident->site?->name, 'site_key'=>$incident->site ? hash('sha256', 'public-status-site:'.$incident->site_id) : null, 'state'=>$incident->site?->state_code ?? $incident->state_code, 'site_status'=>$incident->severity, 'summary'=>$incident->summary ?? ($incident->severity === 'outage' ? 'Service outage' : 'Degraded service'), 'status'=>$incident->status, 'started_at'=>$incident->started_at?->toIso8601String(), 'ended_at'=>$incident->resolved_at?->toIso8601String(), 'active'=>$incident->resolved_at === null, 'updates'=>$incident->updates->map(fn ($u): array => ['message'=>$u->message, 'created_at'=>$u->created_at?->toIso8601String()])->values()->all()];
+        return ['incident_id'=>$incident->id, 'site'=>$incident->site?->name, 'site_key'=>$incident->site ? hash('sha256', 'public-status-site:'.$incident->site_id) : null, 'state'=>$incident->site?->state_code ?? $incident->state_code, 'site_status'=>$incident->severity, 'summary'=>$incident->summary ?? ($incident->severity === 'outage' ? 'Service outage' : 'Degraded service'), 'status'=>$incident->status, 'started_at'=>$incident->started_at?->toIso8601String(), 'monitoring_started_at'=>$incident->monitoring_started_at?->toIso8601String(), 'monitoring_until'=>$incident->monitoring_until?->toIso8601String(), 'ended_at'=>$incident->resolved_at?->toIso8601String(), 'active'=>$incident->resolved_at === null, 'updates'=>$incident->updates->map(fn ($u): array => ['message'=>$u->message, 'created_at'=>$u->created_at?->toIso8601String()])->values()->all()];
     }
 }

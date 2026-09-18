@@ -32,7 +32,7 @@ class RecordOutage
                 $created = true;
                 $incident = StatusIncident::create(['site_id' => $site->id, 'state_code' => $state, 'severity' => $severity, 'status' => 'investigating', 'summary' => $severity === 'outage' ? 'Service outage' : 'Degraded service', 'started_at' => now()]);
             } else {
-                $incident->update(['severity' => $severity, 'status' => 'investigating']);
+                $incident->update(['severity' => $severity, 'status' => 'investigating', 'monitoring_started_at' => null, 'monitoring_until' => null]);
             }
             if ($outage->status_incident_id !== $incident->id) {
                 $outage->status_incident_id = $incident->id;
@@ -51,8 +51,9 @@ class RecordOutage
         $open->save();
         $incident = $open->incident;
         if ($incident !== null && ! $incident->outages()->whereNull('ended_at')->exists()) {
-            $incident->update(['status' => 'resolved', 'resolved_at' => now()]);
-            app(StatusNotificationDispatcher::class)->incidentResolved($incident);
+            $grace = app(\App\Support\StatusPageSettings::class)->publicView()['monitoring_grace_minutes'];
+            $incident->update(['status' => 'monitoring', 'monitoring_started_at' => now(), 'monitoring_until' => now()->addMinutes($grace), 'resolved_at' => null]);
+            app(StatusNotificationDispatcher::class)->incidentMonitoring($incident);
         }
     }
 }

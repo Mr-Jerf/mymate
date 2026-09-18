@@ -20,6 +20,11 @@ class StatusNotificationDispatcher
         $this->dispatch($incident->site, 'updates', $incident->id.':update:'.$updateId, 'Status update for '.$incident->site?->name, $message);
     }
 
+    public function incidentMonitoring(StatusIncident $incident): void
+    {
+        $this->dispatch($incident->site, 'updates', $incident->id.':monitoring', 'Monitoring service at '.$incident->site?->name, "Service has been restored at {$incident->site?->name}; we are monitoring stability before marking the incident resolved.");
+    }
+
     public function incidentResolved(StatusIncident $incident): void
     {
         $this->dispatch($incident->site, 'resolved', $incident->id.':resolved', 'Service restored at '.$incident->site?->name, "Service has been restored at {$incident->site?->name}.");

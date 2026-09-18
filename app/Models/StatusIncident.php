@@ -8,9 +8,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class StatusIncident extends Model
 {
-    protected $fillable = ['site_id', 'state_code', 'severity', 'status', 'summary', 'started_at', 'resolved_at'];
+    protected $fillable = ['site_id', 'state_code', 'severity', 'status', 'summary', 'started_at', 'monitoring_started_at', 'monitoring_until', 'resolved_at'];
 
-    protected $casts = ['started_at' => 'datetime', 'resolved_at' => 'datetime'];
+    protected $casts = ['started_at' => 'datetime', 'monitoring_started_at' => 'datetime', 'monitoring_until' => 'datetime', 'resolved_at' => 'datetime'];
 
     public function site(): BelongsTo
     {

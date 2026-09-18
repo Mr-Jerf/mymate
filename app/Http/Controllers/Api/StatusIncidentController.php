@@ -29,8 +29,17 @@ class StatusIncidentController extends Controller
         $data = $request->validated();
         if (($data['status'] ?? null) === 'resolved') {
             $data['resolved_at'] = now();
+            $data['monitoring_started_at'] = null;
+            $data['monitoring_until'] = null;
+        } elseif (($data['status'] ?? null) === 'monitoring') {
+            $grace = app(\App\Support\StatusPageSettings::class)->publicView()['monitoring_grace_minutes'];
+            $data['resolved_at'] = null;
+            $data['monitoring_started_at'] = now();
+            $data['monitoring_until'] = now()->addMinutes($grace);
         } elseif (array_key_exists('status', $data)) {
             $data['resolved_at'] = null;
+            $data['monitoring_started_at'] = null;
+            $data['monitoring_until'] = null;
         }
         $statusIncident->update($data);
         return new StatusIncidentResource($statusIncident->refresh());

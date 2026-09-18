@@ -4,6 +4,8 @@
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt = (value) => value ? new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}) : '';
   const stateLabel = (s) => s === 'outage' ? 'Outage' : s === 'degraded' ? 'Degraded' : s === 'unknown' ? 'Unknown' : 'Operational';
+  const incidentStatusLabel = (s) => s === 'monitoring' ? 'Monitoring' : s === 'resolved' ? 'Resolved' : s === 'investigating' ? 'Investigating' : String(s || '');
+  const monthLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'long',year:'numeric'});
   const barLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'});
   let snapshot;
 
@@ -36,7 +38,7 @@
   function incidentHtml(incident) {
     const cls = `incident-${incident.severity} incident-${incident.status}`;
     const updates = (incident.updates || []).map((u) => `<p>${esc(u.message)} <span class="tag">${esc(fmt(u.created_at))}</span></p>`).join('');
-    return `<details class="event ${cls}" open><summary><strong>${esc(incident.summary)}</strong><span class="tag">${esc(incident.status)} · ${esc(fmt(incident.started_at))}</span></summary>${updates || '<p>No updates posted.</p>'}</details>`;
+    return `<details class="event ${cls}" open><summary><strong>${esc(incident.site || 'Site')} — ${esc(incident.summary)}</strong><span class="tag">${esc(incidentStatusLabel(incident.status))} · ${esc(fmt(incident.started_at))}</span></summary>${updates || '<p>No updates posted.</p>'}</details>`;
   }
   function showActivity(siteKey, date) {
     const site = snapshot.sites.find((s) => s.key === siteKey);
@@ -59,8 +61,14 @@
   }
   function applyColors(configuration) {
     const root = document.documentElement;
-    const vars = { '--green': configuration.color_operational, '--yellow': configuration.color_degraded, '--red': configuration.color_outage, '--unknown': configuration.color_unknown, '--purple': configuration.color_maintenance_scheduled, '--blue': configuration.color_maintenance_active, '--maintenance-completed': configuration.color_maintenance_completed };
+    const vars = { '--green': configuration.color_operational, '--orange': configuration.color_degraded, '--yellow': configuration.color_monitoring, '--red': configuration.color_outage, '--unknown': configuration.color_unknown, '--purple': configuration.color_maintenance_scheduled, '--blue': configuration.color_maintenance_active, '--maintenance-completed': configuration.color_maintenance_completed };
     Object.entries(vars).forEach(([name, value]) => { if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) root.style.setProperty(name, value); });
+  }
+  function renderHistory(events) {
+    const groups = events.reduce((map, event) => { const key = event.date?.slice(0, 7) || 'unknown'; (map[key] ||= []).push(event); return map; }, {});
+    const keys = Object.keys(groups).sort().reverse();
+    $('history-archive').hidden = keys.length === 0;
+    $('history-months').innerHTML = keys.map((key, index) => `<details class="history-month" ${index === 0 ? 'open' : ''}><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? incidentHtml(event) : `<details class="event maintenance-history ${esc(event.status || '')}" open><summary><strong>${esc(event.site || 'All sites')} — ${esc(event.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(event.starts_at))}</span></summary><p>${esc(event.description || 'Scheduled maintenance')}</p><p>${esc(fmt(event.starts_at))} – ${esc(fmt(event.ends_at))}</p></details>`).join('')}</div></details>`).join('');
   }
   async function refresh() {
     try {
@@ -74,7 +82,7 @@
       $('subscribe-open').hidden = presentation.allow_subscriptions === false || (snapshot.sites || []).length === 0;
       if (presentation.brand_name) { $('brand').textContent = presentation.brand_name; $('footer-brand').textContent = presentation.brand_name; }
       if (presentation.subtitle) $('subtitle').textContent = presentation.subtitle;
-      renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderFeeds(snapshot);
+      renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderFeeds(snapshot); renderHistory(snapshot.history_60d || []);
       $('last-checked').textContent = `Checked ${new Date().toLocaleTimeString()}`; $('error').hidden = true;
     } catch (error) { $('error').hidden = false; $('error').textContent = `Status data is temporarily unavailable. ${error.message}`; }
   }

@@ -45,7 +45,7 @@ class NetworkStatusTest extends TestCase
     public function test_admin_can_read_and_update_status_page_settings(): void
     {
         $this->actingAsUser();
-        $this->getJson('/api/settings/status-page')->assertOk()->assertJsonPath('data.brand_name', 'Network Status')->assertJsonPath('data.logo_url', '/logo.svg')->assertJsonPath('data.favicon_url', '/favicon.svg');
+        $this->getJson('/api/settings/status-page')->assertOk()->assertJsonPath('data.brand_name', 'Network Status')->assertJsonPath('data.logo_url', '/logo.svg')->assertJsonPath('data.favicon_url', '/favicon.svg')->assertJsonPath('data.monitoring_grace_minutes', 30)->assertJsonPath('data.color_monitoring', '#fbbf24');
         $this->putJson('/api/settings/status-page', ['brand_name' => 'Example ISP', 'poll_ms' => 60000])->assertOk()->assertJsonPath('data.brand_name', 'Example ISP')->assertJsonPath('data.poll_ms', 60000);
     }
 
@@ -67,7 +67,7 @@ class NetworkStatusTest extends TestCase
     {
         $this->getJson('/api/public/status')->assertUnauthorized();
         $this->withHeader('X-Status-Api-Key', 'wrong-token')->getJson('/api/public/status')->assertUnauthorized();
-        $this->withHeader('X-Status-Api-Key', 'test-token')->getJson('/api/public/status')->assertOk();
+        $this->withHeader('X-Status-Api-Key', 'test-token')->getJson('/api/public/status')->assertOk()->assertJsonStructure(['data' => ['history_60d']]);
     }
     public function test_public_status_rolls_up_monitored_devices_by_state(): void
     {
