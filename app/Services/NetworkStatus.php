@@ -78,7 +78,7 @@ class NetworkStatus
 
     private function historyPayload($incidents, $maintenance, $now, $windowStart): array
     {
-        $events = $incidents->map(fn (StatusIncident $incident): array => array_merge($this->incidentPayload($incident), ['event_type' => 'incident', 'date' => ($incident->started_at?->greaterThan($windowStart) ? $incident->started_at : $windowStart)?->toDateString()]))
+        $events = $incidents->map(fn (StatusIncident $incident): array => array_merge($this->historyIncidentPayload($incident), ['event_type' => 'incident', 'date' => ($incident->started_at?->greaterThan($windowStart) ? $incident->started_at : $windowStart)?->toDateString()]))
             ->merge($maintenance->map(fn (MaintenanceWindow $window): array => array_merge($this->maintenancePayload($window, $now), ['event_type' => 'maintenance', 'date' => ($window->starts_at?->greaterThan($windowStart) ? $window->starts_at : $windowStart)?->toDateString(), 'site' => 'All sites'])))
             ->sortByDesc('date')->values()->all();
         return $events;
@@ -92,6 +92,21 @@ class NetworkStatus
     private function maintenancePayload(MaintenanceWindow $window, $now): array
     {
         return ['overview'=>$window->name, 'description'=>$window->description, 'starts_at'=>$window->starts_at?->toIso8601String(), 'ends_at'=>$window->ends_at?->toIso8601String(), 'status'=>$window->starts_at <= $now && $window->ends_at > $now ? 'active' : ($window->starts_at > $now ? 'scheduled' : 'completed'), 'active'=>$window->starts_at <= $now && $window->ends_at > $now];
+    }
+
+    private function historyIncidentPayload(StatusIncident $incident): array
+    {
+        return [
+            'site' => $incident->site?->name,
+            'site_status' => $incident->severity,
+            'summary' => $incident->summary ?? ($incident->severity === 'outage' ? 'Service outage' : 'Degraded service'),
+            'status' => $incident->status,
+            'started_at' => $incident->started_at?->toIso8601String(),
+            'monitoring_started_at' => $incident->monitoring_started_at?->toIso8601String(),
+            'monitoring_until' => $incident->monitoring_until?->toIso8601String(),
+            'ended_at' => $incident->resolved_at?->toIso8601String(),
+            'update_count' => $incident->updates->count(),
+        ];
     }
 
     private function incidentPayload(StatusIncident $incident): array
