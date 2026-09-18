@@ -108,6 +108,7 @@ class NetworkStatus
             'monitoring_until' => $incident->monitoring_until?->toIso8601String(),
             'ended_at' => $incident->resolved_at?->toIso8601String(),
             'update_count' => $incident->updates->count(),
+            'updates' => $incident->updates->sortBy('created_at')->take(10)->map(fn ($update): array => ['message' => mb_substr((string) $update->message, 0, 500), 'created_at' => $update->created_at?->toIso8601String()])->values()->all(),
         ], $showSiteNames ? ['site' => $incident->site?->name] : []);
     }
 

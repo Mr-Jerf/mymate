@@ -40,14 +40,20 @@
     try { const response = await fetch('/api/public/status-subscriptions', {method:'POST', headers:{'Content-Type':'application/json',Accept:'application/json'}, body:JSON.stringify({site_key:f.get('site_key'),email:f.get('email'),preferences})}); if (!response.ok && response.status !== 202) throw new Error(); message.textContent = 'If eligible, a confirmation email will be sent.'; form.reset(); } catch (_) { message.textContent = 'We could not process that request right now.'; }
   }
   function incidentHtml(incident) {
-    const cls = `incident-${incident.severity} incident-${incident.status}`;
+    const severity = ['outage', 'degraded', 'monitoring'].includes(incident.site_status) ? incident.site_status : 'unknown';
+    const status = ['investigating', 'monitoring', 'resolved'].includes(incident.status) ? incident.status : 'unknown';
+    const cls = `incident-${severity} incident-${status}`;
     const updates = (incident.updates || []).map((u) => `<p>${esc(u.message)} <span class="tag">${esc(fmt(u.created_at))}</span></p>`).join('');
     return `<details class="event ${cls}" open><summary><strong>${esc(incident.site || 'Site')} — ${esc(incident.summary)}</strong><span class="tag">${esc(incidentStatusLabel(incident.status))} · ${esc(fmt(incident.started_at))}</span></summary>${updates || '<p>No updates posted.</p>'}</details>`;
   }
   function historyIncidentHtml(incident) {
-    const cls = `incident-${incident.site_status} incident-${incident.status}`;
+    const severity = ['outage', 'degraded', 'monitoring'].includes(incident.site_status) ? incident.site_status : 'unknown';
+    const status = ['investigating', 'monitoring', 'resolved'].includes(incident.status) ? incident.status : 'unknown';
+    const cls = `history-incident incident-${severity} incident-${status}`;
     const count = Number(incident.update_count || 0);
-    return `<details class="event ${cls}" open><summary><strong>${esc(incident.site || 'Site')} — ${esc(incident.summary)}</strong><span class="tag">${esc(incidentStatusLabel(incident.status))} · ${esc(fmt(incident.started_at))}</span></summary><p>${count ? `${count} status update${count === 1 ? '' : 's'} recorded.` : 'No status updates recorded.'}</p></details>`;
+    const resolved = incident.status === 'resolved' ? '<span class="history-resolved">Resolved</span>' : '';
+    const updates = (incident.updates || []).map((u) => `<p>${esc(u.message)} <span class="tag">${esc(fmt(u.created_at))}</span></p>`).join('');
+    return `<details class="event ${cls}" open><summary><strong>${esc(incident.site || 'Site')} — ${esc(incident.summary)}</strong>${resolved}<span class="tag">${esc(incidentStatusLabel(incident.status))} · ${esc(fmt(incident.started_at))}</span></summary>${updates || `<p>${count ? `${count} status update${count === 1 ? '' : 's'} recorded.` : 'No status updates recorded.'}</p>`}</details>`;
   }
   function showActivity(siteKey, date) {
     const siteIndex = snapshot.sites.findIndex((s) => s.key === siteKey);
@@ -76,6 +82,7 @@
   }
   function renderHistory(events) {
     const groups = events.reduce((map, event) => { const key = event.date?.slice(0, 7) || 'unknown'; (map[key] ||= []).push(event); return map; }, {});
+    Object.values(groups).forEach((monthEvents) => monthEvents.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
     const keys = Object.keys(groups).sort().reverse();
     $('history-archive').hidden = keys.length === 0;
     $('history-months').innerHTML = keys.map((key, index) => `<details class="history-month" ${index === 0 ? 'open' : ''}><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : `<details class="event maintenance-history ${esc(event.status || '')}" open><summary><strong>${esc(event.site || 'All sites')} — ${esc(event.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(event.starts_at))}</span></summary><p>${esc(event.description || 'Scheduled maintenance')}</p><p>${esc(fmt(event.starts_at))} – ${esc(fmt(event.ends_at))}</p></details>`).join('')}</div></details>`).join('');
