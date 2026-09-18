@@ -55,6 +55,11 @@
     const updates = (incident.updates || []).map((u) => `<p>${esc(u.message)} <span class="tag">${esc(fmt(u.created_at))}</span></p>`).join('');
     return `<details class="event ${cls}" open><summary><strong>${esc(incident.site || 'Site')} — ${esc(incident.summary)}</strong>${resolved}<span class="tag">${esc(incidentStatusLabel(incident.status))} · ${esc(fmt(incident.started_at))}</span></summary>${updates || `<p>${count ? `${count} status update${count === 1 ? '' : 's'} recorded.` : 'No status updates recorded.'}</p>`}</details>`;
   }
+  function maintenanceHistoryHtml(maintenance) {
+    const status = ['scheduled', 'active', 'completed'].includes(maintenance.status) ? maintenance.status : 'scheduled';
+    const label = status === 'active' ? 'In progress' : status[0].toUpperCase() + status.slice(1);
+    return `<details class="event maintenance-history maintenance-${status}" open><summary><strong>${esc(maintenance.overview)}</strong><span class="history-maintenance-status ${status}">${esc(label)}</span><span class="tag">Maintenance · ${esc(fmt(maintenance.starts_at))}</span></summary><p>${esc(maintenance.description || 'Scheduled maintenance')}</p><p>${esc(fmt(maintenance.starts_at))} – ${esc(fmt(maintenance.ends_at))}</p></details>`;
+  }
   function showActivity(siteKey, date) {
     const siteIndex = snapshot.sites.findIndex((s) => s.key === siteKey);
     const site = siteIndex >= 0 ? snapshot.sites[siteIndex] : null;
@@ -62,8 +67,8 @@
     if (!site || !day) return;
     $('activity').hidden = false;
     $('activity-title').textContent = `${siteLabel(site, siteIndex)} · Activity for ${barLabel(date)}`;
-    const incidents = (day.incidents || []).map(incidentHtml).join('');
-    const maintenance = (day.maintenance || []).map((m) => `<details class="event ${esc(m.status || '')}"><summary><strong>${esc(m.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(m.starts_at))}</span></summary><p>${esc(m.description || 'Scheduled maintenance')}</p><p>${esc(fmt(m.starts_at))} – ${esc(fmt(m.ends_at))}</p></details>`).join('');
+    const incidents = (day.incidents || []).map(historyIncidentHtml).join('');
+    const maintenance = (day.maintenance || []).map(maintenanceHistoryHtml).join('');
     $('activity-body').innerHTML = incidents + maintenance || '<p>No incidents or maintenance were recorded for this day.</p>';
     $('activity').scrollIntoView({behavior:'smooth',block:'nearest'});
   }
@@ -73,7 +78,7 @@
     $('incident-list').innerHTML = incidents.map(incidentHtml).join('');
     const maintenance = data.maintenance || [];
     $('maintenance').hidden = maintenance.length === 0;
-    $('maintenance-list').innerHTML = maintenance.map((m) => `<details class="event ${m.status}"><summary><strong>${esc(m.overview)}</strong><span class="tag">${esc(m.status)} · ${esc(fmt(m.starts_at))}</span></summary><p>${esc(m.description || '')}</p><p>${esc(fmt(m.starts_at))} – ${esc(fmt(m.ends_at))}</p></details>`).join('');
+    $('maintenance-list').innerHTML = maintenance.map(maintenanceHistoryHtml).join('');
   }
   function applyColors(configuration) {
     const root = document.documentElement;
@@ -85,7 +90,7 @@
     Object.values(groups).forEach((monthEvents) => monthEvents.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
     const keys = Object.keys(groups).sort().reverse();
     $('history-archive').hidden = keys.length === 0;
-    $('history-months').innerHTML = keys.map((key, index) => `<details class="history-month" ${index === 0 ? 'open' : ''}><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : `<details class="event maintenance-history ${esc(event.status || '')}" open><summary><strong>${esc(event.site || 'All sites')} — ${esc(event.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(event.starts_at))}</span></summary><p>${esc(event.description || 'Scheduled maintenance')}</p><p>${esc(fmt(event.starts_at))} – ${esc(fmt(event.ends_at))}</p></details>`).join('')}</div></details>`).join('');
+    $('history-months').innerHTML = keys.map((key, index) => `<details class="history-month" ${index === 0 ? 'open' : ''}><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : maintenanceHistoryHtml(event)).join('')}</div></details>`).join('');
   }
   async function refresh() {
     try {
