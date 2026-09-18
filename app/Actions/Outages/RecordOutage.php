@@ -61,7 +61,7 @@ class RecordOutage
             if ($incident !== null && ! $incident->outages()->whereNull('ended_at')->exists()) {
                 $grace = app(\App\Support\StatusPageSettings::class)->publicView()['monitoring_grace_minutes'];
                 $incident->update(['status' => 'monitoring', 'monitoring_started_at' => now(), 'monitoring_until' => now()->addMinutes($grace), 'resolved_at' => null]);
-                app(StatusNotificationDispatcher::class)->incidentMonitoring($incident);
+                DB::afterCommit(fn () => app(StatusNotificationDispatcher::class)->incidentMonitoring($incident));
             }
         });
     }
