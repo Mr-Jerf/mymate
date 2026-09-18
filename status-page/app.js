@@ -50,11 +50,12 @@
     return `<details class="event ${cls}" open><summary><strong>${esc(incident.site || 'Site')} — ${esc(incident.summary)}</strong><span class="tag">${esc(incidentStatusLabel(incident.status))} · ${esc(fmt(incident.started_at))}</span></summary><p>${count ? `${count} status update${count === 1 ? '' : 's'} recorded.` : 'No status updates recorded.'}</p></details>`;
   }
   function showActivity(siteKey, date) {
-    const site = snapshot.sites.find((s) => s.key === siteKey);
+    const siteIndex = snapshot.sites.findIndex((s) => s.key === siteKey);
+    const site = siteIndex >= 0 ? snapshot.sites[siteIndex] : null;
     const day = site?.history_7d?.find((d) => d.date === date);
     if (!site || !day) return;
     $('activity').hidden = false;
-    $('activity-title').textContent = `${siteLabel(site)} · Activity for ${barLabel(date)}`;
+    $('activity-title').textContent = `${siteLabel(site, siteIndex)} · Activity for ${barLabel(date)}`;
     const incidents = (day.incidents || []).map(incidentHtml).join('');
     const maintenance = (day.maintenance || []).map((m) => `<details class="event ${esc(m.status || '')}"><summary><strong>${esc(m.overview)}</strong><span class="tag">Maintenance · ${esc(fmt(m.starts_at))}</span></summary><p>${esc(m.description || 'Scheduled maintenance')}</p><p>${esc(fmt(m.starts_at))} – ${esc(fmt(m.ends_at))}</p></details>`).join('');
     $('activity-body').innerHTML = incidents + maintenance || '<p>No incidents or maintenance were recorded for this day.</p>';
