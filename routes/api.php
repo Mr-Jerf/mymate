@@ -45,6 +45,7 @@ use App\Http\Controllers\Api\SubnetController;
 use App\Http\Controllers\Api\SystemStatusController;
 use App\Http\Controllers\Api\StatusIncidentController;
 use App\Http\Controllers\Api\StatusPageSettingsController;
+use App\Http\Controllers\Api\StatusSubscriptionController;
 use App\Http\Controllers\Api\Tools\ToolsController;
 use App\Http\Controllers\Api\TraceController;
 use App\Http\Controllers\Api\UpdateCheckController;
@@ -67,7 +68,10 @@ Route::post('contact', [ContactController::class, 'store'])->middleware('throttl
 Route::get('public/status', NetworkStatusController::class)
     ->middleware(['throttle:60,1', 'status-token'])->name('public.status');
 
-// Public wallboard (GitHub #15): an unguessable per-map share token grants a read-only,
+Route::post('public/status-subscriptions', [StatusSubscriptionController::class, 'store'])->middleware('throttle:5,1')->name('public.status-subscriptions.store');
+Route::get('public/status-subscriptions/verify/{token}', [StatusSubscriptionController::class, 'verify'])->middleware('throttle:20,1')->name('public.status-subscriptions.verify');
+Route::get('public/status-subscriptions/unsubscribe/{token}', [StatusSubscriptionController::class, 'unsubscribe'])->middleware('throttle:20,1')->name('public.status-subscriptions.unsubscribe');
+
 // no-login view of one map. Token-gated, read-only, and rate-limited. The payload is a
 // whitelist - no addresses or credentials cross this boundary (see PublicWallController).
 Route::middleware('throttle:120,1')->prefix('public/wall/{token}')
