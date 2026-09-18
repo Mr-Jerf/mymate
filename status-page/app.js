@@ -9,8 +9,16 @@
   const barLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'});
   let snapshot;
   let publicPresentation = {show_site_names: true, show_device_counts: true};
+  const eventTimestamp = (event) => {
+    const updates = Array.isArray(event.updates) ? event.updates : [];
+    const latestUpdate = updates.map((update) => update.created_at).filter(Boolean).sort().pop();
+    return event.ended_at || event.ends_at || event.latest_update_at || latestUpdate || event.started_at || event.starts_at || '';
+  };
+  const newestEventsFirst = (events) => [...events].sort((a, b) => {
+    const timestampOrder = String(eventTimestamp(b)).localeCompare(String(eventTimestamp(a)));
+    return timestampOrder || String(b.started_at || b.starts_at || '').localeCompare(String(a.started_at || a.starts_at || ''));
+  });
   const siteLabel = (site, index = 0) => publicPresentation.show_site_names && site.name ? site.name : `Public site ${index + 1}`;
-
   function renderOverall(overall) {
     const node = $('overall'); node.className = `overall ${overall.status}`;
     node.innerHTML = `<span class="pulse"></span><div><strong>${esc(overall.label)}</strong><small>Last checked just now · Updates automatically</small></div>`;
@@ -67,9 +75,11 @@
     if (!site || !day) return;
     $('activity').hidden = false;
     $('activity-title').textContent = `${siteLabel(site, siteIndex)} · Activity for ${barLabel(date)}`;
-    const incidents = (day.incidents || []).map(historyIncidentHtml).join('');
-    const maintenance = (day.maintenance || []).map(maintenanceHistoryHtml).join('');
-    $('activity-body').innerHTML = incidents + maintenance || '<p>No incidents or maintenance were recorded for this day.</p>';
+    const events = newestEventsFirst([
+      ...(day.incidents || []).map((event) => ({...event, event_type: 'incident'})),
+      ...(day.maintenance || []).map((event) => ({...event, event_type: 'maintenance'})),
+    ]);
+    $('activity-body').innerHTML = events.map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : maintenanceHistoryHtml(event)).join('') || '<p>No incidents or maintenance were recorded for this day.</p>';
     $('activity').scrollIntoView({behavior:'smooth',block:'nearest'});
   }
 
@@ -80,7 +90,7 @@
   }
   function renderHistory(events) {
     const groups = events.reduce((map, event) => { const key = event.date?.slice(0, 7) || 'unknown'; (map[key] ||= []).push(event); return map; }, {});
-    Object.values(groups).forEach((monthEvents) => monthEvents.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))));
+    Object.keys(groups).forEach((key) => { groups[key] = newestEventsFirst(groups[key]); });
     const keys = Object.keys(groups).sort().reverse();
     $('history-archive').hidden = keys.length === 0;
     $('history-months').innerHTML = keys.map((key, index) => `<details class="history-month" ${index === 0 ? 'open' : ''}><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : maintenanceHistoryHtml(event)).join('')}</div></details>`).join('');
