@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { MapPin, Plus, X } from '@phosphor-icons/react';
+import { MapPin, Plus, X, PencilSimple, Check } from '@phosphor-icons/react';
 import { apiClient } from '../../../lib/apiClient';
 import { pushToast } from '../../../lib/toast';
 
@@ -67,14 +67,17 @@ export function NetworkLocationsSection() {
         },
         onError: () => pushToast({ title: "Couldn't create site", tone: 'down' }),
     });
+    const [editingSiteId, setEditingSiteId] = useState<number | null>(null);
+    const [siteNameDraft, setSiteNameDraft] = useState('');
     const update = useMutation({
-        mutationFn: async ({ id, state_code }: { id: number; state_code: string | null }) =>
-            (await apiClient.patch(`/sites/${id}`, { state_code })).data,
+        mutationFn: async ({ id, state_code, name }: { id: number; state_code?: string | null; name?: string }) =>
+            (await apiClient.patch(`/sites/${id}`, { ...(name !== undefined ? { name } : {}), ...(state_code !== undefined ? { state_code } : {}) })).data,
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ['sites'] });
-            pushToast({ title: 'Network state saved', tone: 'up' });
+            setEditingSiteId(null);
+            pushToast({ title: 'Network status site saved', tone: 'up' });
         },
-        onError: () => pushToast({ title: "Couldn't save network state", tone: 'down' }),
+        onError: () => pushToast({ title: "Couldn't save network status site", tone: 'down' }),
     });
 
     return (
@@ -124,9 +127,13 @@ export function NetworkLocationsSection() {
             )}
             {isLoading ? <p className="text-sm text-white/40">Loading sites...</p> : (
                 <div className="space-y-2">
-                    {sites?.map((site) => (
-                        <label key={site.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.02] px-3 py-2 ring-1 ring-white/[0.05]">
-                            <span className="min-w-0 truncate text-sm text-white/75">{site.name}</span>
+                    {sites?.map((site) => {
+                        const editing = editingSiteId === site.id;
+                        return <div key={site.id} className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.02] px-3 py-2 ring-1 ring-white/[0.05]">
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                                {editing ? <input autoFocus aria-label={`Name for ${site.name}`} value={siteNameDraft} onChange={(event) => setSiteNameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && siteNameDraft.trim()) update.mutate({ id: site.id, name: siteNameDraft.trim() }); if (event.key === 'Escape') setEditingSiteId(null); }} className="min-w-0 flex-1 rounded-lg bg-white/[0.04] px-2 py-1.5 text-sm text-white ring-1 ring-white/10 outline-none" /> : <span className="min-w-0 truncate text-sm text-white/75">{site.name}</span>}
+                                {editing ? <><button type="button" aria-label={`Save name for ${site.name}`} disabled={update.isPending || !siteNameDraft.trim()} onClick={() => update.mutate({ id: site.id, name: siteNameDraft.trim() })} className="rounded p-1 text-emerald-300 hover:bg-white/10 disabled:opacity-40"><Check weight="bold" className="h-4 w-4" /></button><button type="button" aria-label="Cancel site name edit" onClick={() => setEditingSiteId(null)} className="rounded p-1 text-white/50 hover:bg-white/10 hover:text-white"><X weight="bold" className="h-4 w-4" /></button></> : <button type="button" aria-label={`Edit ${site.name}`} onClick={() => { setEditingSiteId(site.id); setSiteNameDraft(site.name); }} className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white"><PencilSimple weight="bold" className="h-4 w-4" /></button>}
+                            </div>
                             <select
                                 aria-label={`State for ${site.name}`}
                                 className="shrink-0 rounded-lg bg-white/[0.04] px-2 py-1.5 text-xs text-white ring-1 ring-white/10 outline-none [color-scheme:dark]"
@@ -137,8 +144,8 @@ export function NetworkLocationsSection() {
                                 <option value="">Unassigned</option>
                                 {STATES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
                             </select>
-                        </label>
-                    ))}
+                        </div>;
+                    })}
                     {!sites?.length && <p className="text-sm text-white/40">No sites have been created yet.</p>}
                 </div>
             )}
