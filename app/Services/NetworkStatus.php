@@ -3,9 +3,11 @@
 namespace App\Services;
 
 use App\Models\MaintenanceWindow;
+use App\Models\Device;
 use App\Models\Site;
 use App\Models\StatusIncident;
 use App\Support\StatusPageSettings;
+use App\Support\DeviceScope;
 
 class NetworkStatus
 {
@@ -34,7 +36,7 @@ class NetworkStatus
         $showSiteNames = $settings['show_site_names'];
         $showDeviceCounts = $settings['show_device_counts'];
         $publicSites = $sites->map(fn (Site $site): array => $this->siteSnapshot($site, $windowStart, $windowSeconds, $now, $historyIncidents, $historyMaintenance, $showSiteNames, $showDeviceCounts))->values()->all();
-        $maintenance = $this->maintenance($now->copy()->subDays(30), $now->copy()->addDays(30))->map(fn (MaintenanceWindow $window): array => $this->maintenancePayload($window, $now))->values()->all();
+        $maintenance = $this->maintenance($now->copy()->subDays(30), $now->copy()->addDays(30))->map(fn (MaintenanceWindow $window): array => $this->maintenancePayload($window, $now, $showSiteNames))->values()->all();
         $statusFeed = StatusIncident::query()->whereNotNull('site_id')->whereHas('site', fn ($query) => $query->whereIn('state_code', array_keys(self::STATES)))->where('started_at', '<', $now)
             ->where(fn ($q) => $q->whereNull('resolved_at')->orWhere('resolved_at', '>', $now->copy()->subDays(30)))
             ->with(['site', 'updates'])->orderByDesc('started_at')->limit(100)->get()
@@ -59,9 +61,9 @@ class NetworkStatus
         $history = collect(range(59, 0))->map(function (int $daysAgo) use ($site, $now, $historyIncidents, $historyMaintenance, $showSiteNames): array {
             $dayStart = $now->copy()->subDays($daysAgo)->startOfDay(); $dayEnd = $dayStart->copy()->endOfDay();
             $incidents = $historyIncidents->filter(fn (StatusIncident $incident): bool => $incident->site_id === $site->id && $incident->started_at <= $dayEnd && ($incident->resolved_at === null || $incident->resolved_at >= $dayStart));
-            $maintenance = $historyMaintenance->filter(fn (MaintenanceWindow $window): bool => $window->starts_at <= $dayEnd && $window->ends_at >= $dayStart);
+            $maintenance = $historyMaintenance->filter(fn (MaintenanceWindow $window): bool => $window->starts_at <= $dayEnd && $window->ends_at >= $dayStart && $this->maintenanceAffectsSite($window, $site->id));
             $hasEvent = $incidents->isNotEmpty() || $maintenance->isNotEmpty();
-            return ['date'=>$dayStart->toDateString(), 'status'=>$hasEvent ? 'outage' : 'operational', 'incidents'=>$incidents->map(fn ($i): array => $this->historyIncidentPayload($i, $showSiteNames))->values()->all(), 'maintenance'=>$maintenance->map(fn ($w): array => $this->maintenancePayload($w, $now))->values()->all()];
+            return ['date'=>$dayStart->toDateString(), 'status'=>$hasEvent ? 'outage' : 'operational', 'incidents'=>$incidents->map(fn ($i): array => $this->historyIncidentPayload($i, $showSiteNames))->values()->all(), 'maintenance'=>$maintenance->map(fn ($w): array => $this->maintenancePayload($w, $now, $showSiteNames))->values()->all()];
         })->values();
         $history7 = $history->slice(-7)->values()->all();
         $historyDaily = $history->all();
@@ -85,19 +87,47 @@ class NetworkStatus
     private function historyPayload($incidents, $maintenance, $now, $windowStart, bool $showSiteNames): array
     {
         $events = $incidents->map(fn (StatusIncident $incident): array => array_merge($this->historyIncidentPayload($incident, $showSiteNames), ['event_type' => 'incident', 'date' => ($incident->started_at?->greaterThan($windowStart) ? $incident->started_at : $windowStart)?->toDateString()]))
-            ->merge($maintenance->map(fn (MaintenanceWindow $window): array => array_merge($this->maintenancePayload($window, $now), ['event_type' => 'maintenance', 'date' => ($window->starts_at?->greaterThan($windowStart) ? $window->starts_at : $windowStart)?->toDateString(), 'site' => 'All sites'])))
+            ->merge($maintenance->map(fn (MaintenanceWindow $window): array => array_merge($this->maintenancePayload($window, $now, $showSiteNames), ['event_type' => 'maintenance', 'date' => ($window->starts_at?->greaterThan($windowStart) ? $window->starts_at : $windowStart)?->toDateString()])))
             ->sortByDesc('date')->values()->all();
         return $events;
     }
 
-    private function maintenance($from, $to)
+    private function maintenanceAffectsSite(MaintenanceWindow $window, int $siteId): bool
     {
-        return MaintenanceWindow::query()->where('enabled', true)->where('ends_at', '>', $from)->where('starts_at', '<=', $to)->orderBy('starts_at')->get()->filter(fn (MaintenanceWindow $w): bool => $w->scope === null || (is_array($w->scope) && ($w->scope['type'] ?? null) === 'all'))->take(100);
+        return in_array($siteId, $this->maintenanceSiteIds($window), true);
     }
 
-    private function maintenancePayload(MaintenanceWindow $window, $now): array
+    /** @return array<int> */
+    private function maintenanceSiteIds(MaintenanceWindow $window): array
     {
-        return ['overview'=>$window->name, 'description'=>$window->description, 'starts_at'=>$window->starts_at?->toIso8601String(), 'ends_at'=>$window->ends_at?->toIso8601String(), 'status'=>$window->starts_at <= $now && $window->ends_at > $now ? 'active' : ($window->starts_at > $now ? 'scheduled' : 'completed'), 'active'=>$window->starts_at <= $now && $window->ends_at > $now];
+        $scope = is_array($window->scope) ? $window->scope : [];
+        $publicSiteIds = Site::query()->whereIn('state_code', array_keys(self::STATES))->pluck('id')->all();
+        $type = $scope['type'] ?? null;
+        if ($type === null || $type === 'all') return array_map('intval', $publicSiteIds);
+        if ($type === 'site') {
+            $siteId = (int) ($scope['site_id'] ?? 0);
+            return in_array($siteId, array_map('intval', $publicSiteIds), true) ? [$siteId] : [];
+        }
+        $deviceIds = DeviceScope::resolve($scope);
+        if ($deviceIds === []) return [];
+        return Device::query()->whereIn('id', $deviceIds)->whereIn('site_id', $publicSiteIds)->whereNotNull('site_id')->pluck('site_id')->map(fn ($id): int => (int) $id)->unique()->values()->all();
+    }
+
+    private function maintenance($from, $to)
+    {
+        return MaintenanceWindow::query()->where('enabled', true)->where('ends_at', '>', $from)->where('starts_at', '<=', $to)->orderBy('starts_at')->get()->filter(function (MaintenanceWindow $window): bool {
+            $scope = $window->scope;
+            return ($scope === null || (is_array($scope) && in_array($scope['type'] ?? null, ['all', 'site', 'device_type', 'map', 'devices'], true))) && $this->maintenanceSiteIds($window) !== [];
+        })->take(100);
+    }
+
+    private function maintenancePayload(MaintenanceWindow $window, $now, bool $showSiteNames = false): array
+    {
+        $sites = [];
+        if ($showSiteNames) {
+            $sites = Site::query()->whereIn('state_code', array_keys(self::STATES))->whereIn('id', $this->maintenanceSiteIds($window))->orderBy('name')->pluck('name')->values()->all();
+        }
+        return array_merge(['overview'=>$window->name, 'description'=>$window->description, 'starts_at'=>$window->starts_at?->toIso8601String(), 'ends_at'=>$window->ends_at?->toIso8601String(), 'status'=>$window->starts_at <= $now && $window->ends_at > $now ? 'active' : ($window->starts_at > $now ? 'scheduled' : 'completed'), 'active'=>$window->starts_at <= $now && $window->ends_at > $now], $showSiteNames ? ['sites' => $sites] : []);
     }
 
     private function historyIncidentPayload(StatusIncident $incident, bool $showSiteNames): array

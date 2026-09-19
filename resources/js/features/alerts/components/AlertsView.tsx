@@ -22,6 +22,8 @@ const SCOPED_CONDITIONS: AlertConditionType[] = ['device_down', 'high_util', 'lo
 /** Short targeting label for the policy list row. */
 function scopeSummary(scope: AlertScope): string {
     switch (scope.type) {
+        case 'site':
+            return 'site: selected site';
         case 'device_type':
             return `type: ${scope.device_type ?? '-'}`;
         case 'map':

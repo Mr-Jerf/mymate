@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useDevices } from '../features/devices/api/getDevices';
 import { useMaps } from '../features/maps/api/maps';
+import { useSites } from '../features/geo/api/sites';
 import type { AlertScope, DeviceType } from '../types';
 
 const DEVICE_TYPES: DeviceType[] = ['router', 'switch', 'ap', 'server', 'internet', 'unknown'];
@@ -17,6 +18,7 @@ const field =
 export function ScopeEditor({ scope, onChange }: { scope: AlertScope; onChange: (s: AlertScope) => void }) {
     const { data: devices } = useDevices();
     const { data: maps } = useMaps();
+    const { data: sites } = useSites();
     const [q, setQ] = useState('');
     const ids = scope.device_ids ?? [];
     const query = q.trim().toLowerCase();
@@ -34,11 +36,19 @@ export function ScopeEditor({ scope, onChange }: { scope: AlertScope; onChange: 
                     onChange={(e) => onChange({ type: e.target.value as AlertScope['type'] })}
                 >
                     <option value="all">All devices</option>
+                    <option value="site">A site...</option>
                     <option value="device_type">Device type...</option>
                     <option value="map">A map...</option>
                     <option value="devices">Specific devices...</option>
                 </select>
             </label>
+
+            {scope.type === 'site' && (
+                <select className={field} value={scope.site_id ?? ''} onChange={(e) => onChange({ ...scope, site_id: Number(e.target.value) })}>
+                    <option value="" disabled>Choose a site...</option>
+                    {(sites ?? []).map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+                </select>
+            )}
 
             {scope.type === 'device_type' && (
                 <select

@@ -2311,9 +2311,10 @@ paths:
                                         ends_at: { type: string, format: date-time, nullable: true }
                                         status: { type: string, enum: [scheduled, active, completed] }
                                         active: { type: boolean }
+                                        sites: { type: array, items: { type: string }, description: Public impacted site names when site-name visibility is enabled }
                       maintenance:
                         type: array
-                        description: Public fleet-wide active or upcoming maintenance notices; device-specific scopes are excluded.
+                        description: Active and upcoming maintenance notices with aggregate impacted-site names when site-name visibility is enabled.
                         items:
                           type: object
                           required: [overview, description, starts_at, ends_at, status, active]
@@ -2324,6 +2325,7 @@ paths:
                             ends_at: { type: string, format: date-time, nullable: true }
                             status: { type: string, enum: [scheduled, active, completed] }
                             active: { type: boolean }
+                            sites: { type: array, items: { type: string }, description: Public impacted site names when site-name visibility is enabled }
                       status_feed:
                         type: array
                         description: Active site-level outage updates; device names and internal details are omitted.
@@ -3020,6 +3022,7 @@ components:
         starts_at: { type: string, format: date-time, nullable: true }
         ends_at: { type: string, format: date-time, nullable: true }
         scope: { $ref: "#/components/schemas/Scope" }
+        sites: { type: array, items: { type: string }, description: Public impacted site names when site-name visibility is enabled }
         enabled: { type: boolean }
         active: { type: boolean }
     MaintenanceWindowWrite:
@@ -3159,7 +3162,8 @@ components:
       type: object
       description: Targeting rule shared by alert policies, sensors and maintenance windows.
       properties:
-        type: { type: string, enum: [all, device_type, map, devices] }
+        type: { type: string, enum: [all, site, device_type, map, devices] }
+        site_id: { type: integer, description: "When type=site." }
         device_type: { type: string, enum: [router, switch, ap, server, internet, unknown], description: "When type=device_type." }
         map_id: { type: integer, description: "When type=map." }
         device_ids: { type: array, items: { type: integer }, description: "When type=devices." }

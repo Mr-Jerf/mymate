@@ -33,6 +33,9 @@ class DeviceScope
 
         return match ($type) {
             'all' => null,
+            'site' => is_int($scope['site_id'] ?? null) || (is_string($scope['site_id'] ?? null) && ctype_digit($scope['site_id']))
+                ? Device::where('site_id', (int) $scope['site_id'])->pluck('id')->all()
+                : [],
             'device_type' => is_string($scope['device_type'] ?? null)
                 ? Device::where('device_type', $scope['device_type'])->pluck('id')->all()
                 : [],

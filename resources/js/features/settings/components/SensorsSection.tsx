@@ -12,6 +12,8 @@ const field =
 
 function scopeSummary(scope: AlertScope): string {
     switch (scope.type) {
+        case 'site':
+            return 'site: selected site';
         case 'device_type':
             return `type: ${scope.device_type ?? '-'}`;
         case 'map':

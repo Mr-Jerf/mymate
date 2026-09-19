@@ -68,7 +68,8 @@
   function maintenanceHistoryHtml(maintenance) {
     const status = ['scheduled', 'active', 'completed'].includes(maintenance.status) ? maintenance.status : 'scheduled';
     const label = status === 'active' ? 'In progress' : status[0].toUpperCase() + status.slice(1);
-    return `<details class="event maintenance-history maintenance-${status}" open><summary><strong>${esc(maintenance.overview)}</strong><span class="history-maintenance-status ${status}">${esc(label)}</span><span class="tag">Maintenance · ${esc(fmt(maintenance.starts_at))}</span></summary><p>${esc(maintenance.description || 'Scheduled maintenance')}</p><p>${esc(fmt(maintenance.starts_at))} – ${esc(fmt(maintenance.ends_at))}</p></details>`;
+    const sites = Array.isArray(maintenance.sites) && maintenance.sites.length > 0 ? maintenance.sites.join(', ') : 'Public sites';
+    return `<details class="event maintenance-history maintenance-${status}" open><summary><strong>${esc(maintenance.overview)}</strong><span class="history-maintenance-status ${status}">${esc(label)}</span><span class="tag">Maintenance · ${esc(fmt(maintenance.starts_at))}</span></summary><p>Impacted sites: ${esc(sites)}</p><p>${esc(maintenance.description || 'Scheduled maintenance')}</p><p>${esc(fmt(maintenance.starts_at))} – ${esc(fmt(maintenance.ends_at))}</p></details>`;
   }
   function showActivity(siteKey, date) {
     const siteIndex = snapshot.sites.findIndex((s) => s.key === siteKey);

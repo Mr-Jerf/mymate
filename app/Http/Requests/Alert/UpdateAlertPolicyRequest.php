@@ -32,7 +32,8 @@ class UpdateAlertPolicyRequest extends FormRequest
             'params.suppress_dependent' => ['nullable', 'boolean'],
             // Targeting - limit the policy to a device subset. null/all = fleet-wide.
             'scope' => ['nullable', 'array'],
-            'scope.type' => ['nullable', Rule::in(['all', 'device_type', 'map', 'devices'])],
+            'scope.type' => ['nullable', Rule::in(['all', 'site', 'device_type', 'map', 'devices'])],
+            'scope.site_id' => ['nullable', 'required_if:scope.type,site', 'integer', 'exists:sites,id'],
             'scope.device_type' => ['nullable', 'required_if:scope.type,device_type', Rule::enum(DeviceType::class)],
             'scope.map_id' => ['nullable', 'required_if:scope.type,map', 'integer', 'exists:maps,id'],
             'scope.device_ids' => ['nullable', 'required_if:scope.type,devices', 'array'],
