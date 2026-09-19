@@ -688,6 +688,7 @@ export function DeviceInspector() {
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                 <Detail label="Mgmt IP" value={device.mgmt_ip} mono />
+                <Detail label="Site" value={device.site_name ?? '-'} />
                 <Detail label="Uptime" value={fmtUptime(device.uptime_seconds, device.uptime_at)} mono />
                 {isAdmin ? (
                     <PollMethodPicker device={device} />
