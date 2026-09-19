@@ -2253,18 +2253,64 @@ paths:
                         description: Explicitly created, state-assigned MyMate sites.
                         items:
                           type: object
-                          required: [key, name, state_code, state_name, status, uptime_60d, monitored_devices, down_devices, unknown_devices, history_7d]
+                          required: [key, state_code, state_name, status, uptime_60d, history_7d, history_daily]
                           properties:
                             key: { type: string, description: Opaque public site key }
-                            name: { type: string }
+                            name: { type: string, description: Present only when public site-name visibility is enabled }
                             state_code: { type: string, pattern: '^[A-Z]{2}$' }
                             state_name: { type: string }
                             status: { type: string, enum: [operational, degraded, outage, unknown] }
                             uptime_60d: { type: number, format: float, nullable: true, minimum: 0, maximum: 100 }
-                            monitored_devices: { type: integer, minimum: 0 }
-                            down_devices: { type: integer, minimum: 0 }
-                            unknown_devices: { type: integer, minimum: 0 }
-                            history_7d: { type: array, items: { type: object } }
+                            monitored_devices: { type: integer, minimum: 0, description: Present only when public device-count visibility is enabled }
+                            down_devices: { type: integer, minimum: 0, description: Present only when public device-count visibility is enabled }
+                            unknown_devices: { type: integer, minimum: 0, description: Present only when public device-count visibility is enabled }
+                            history_7d: { type: array, description: The newest seven records from history_daily, items: { type: object } }
+                            history_daily:
+                              type: array
+                              minItems: 1
+                              maxItems: 60
+                              description: Server-authoritative daily aggregate history used by the 7d, 30d, and 60d bar views.
+                              items:
+                                type: object
+                                required: [date, status, incidents, maintenance]
+                                properties:
+                                  date: { type: string, format: date }
+                                  status: { type: string, enum: [operational, outage] }
+                                  incidents:
+                                    type: array
+                                    items:
+                                      type: object
+                                      required: [site_status, summary, status, started_at, ended_at, update_count, latest_update_at, updates]
+                                      properties:
+                                        site: { type: string, nullable: true }
+                                        site_status: { type: string, enum: [degraded, outage, monitoring] }
+                                        summary: { type: string }
+                                        status: { type: string, enum: [investigating, monitoring, resolved] }
+                                        started_at: { type: string, format: date-time, nullable: true }
+                                        ended_at: { type: string, format: date-time, nullable: true }
+                                        update_count: { type: integer, minimum: 0 }
+                                        latest_update_at: { type: string, format: date-time, nullable: true }
+                                        updates:
+                                          type: array
+                                          maxItems: 10
+                                          items:
+                                            type: object
+                                            required: [message, created_at]
+                                            properties:
+                                              message: { type: string, maxLength: 500 }
+                                              created_at: { type: string, format: date-time, nullable: true }
+                                  maintenance:
+                                    type: array
+                                    items:
+                                      type: object
+                                      required: [overview, description, starts_at, ends_at, status, active]
+                                      properties:
+                                        overview: { type: string }
+                                        description: { type: string, nullable: true }
+                                        starts_at: { type: string, format: date-time, nullable: true }
+                                        ends_at: { type: string, format: date-time, nullable: true }
+                                        status: { type: string, enum: [scheduled, active, completed] }
+                                        active: { type: boolean }
                       maintenance:
                         type: array
                         description: Public fleet-wide active or upcoming maintenance notices; device-specific scopes are excluded.

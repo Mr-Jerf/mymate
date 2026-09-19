@@ -8,6 +8,7 @@
   const monthLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'long',year:'numeric'});
   const barLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'});
   let snapshot;
+  let historyRange = 7;
   let publicPresentation = {show_site_names: true, show_device_counts: true};
   const eventTimestamp = (event) => {
     const updates = Array.isArray(event.updates) ? event.updates : [];
@@ -29,10 +30,10 @@
       return;
     }
     $('sites').innerHTML = sites.map((site, index) => {
-      const history = (site.history_7d || []).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-7);
+      const history = (site.history_daily || site.history_7d || []).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-historyRange);
       const label = siteLabel(site, index);
       const meta = [site.state_name, publicPresentation.show_device_counts && site.monitored_devices !== undefined ? `${site.monitored_devices} monitored` : '', publicPresentation.show_device_counts && site.down_devices !== undefined ? `${site.down_devices} down` : ''].filter(Boolean).join(' · ');
-      return `<article class="state-card" id="site-${esc(site.key)}"><div class="state-head"><span class="state-name">${esc(label)}</span><span class="state-status ${site.status}">${stateLabel(site.status)}</span></div><div class="uptime">${site.uptime_60d == null ? '—' : `${Number(site.uptime_60d).toFixed(2)}%`}</div><div class="meta">${esc(meta)}</div><div class="history"><div class="history-title"><span>Last 7 days</span><span>Click a day for details</span></div><div class="bars">${history.map((day) => `<a class="bar ${day.status}" href="#activity" data-site="${esc(site.key)}" data-date="${esc(day.date)}" title="${esc(day.date)}: ${stateLabel(day.status)}" aria-label="${esc(label)} ${esc(day.date)} ${esc(stateLabel(day.status))}"></a>`).join('')}</div><div class="days">${history.map((day) => `<span>${esc(barLabel(day.date))}</span>`).join('')}</div></div></article>`;
+      return `<article class="state-card" id="site-${esc(site.key)}"><div class="state-head"><span class="state-name">${esc(label)}</span><span class="state-status ${site.status}">${stateLabel(site.status)}</span></div><div class="uptime">${site.uptime_60d == null ? '—' : `${Number(site.uptime_60d).toFixed(2)}%`}</div><div class="meta">${esc(meta)}</div><div class="history"><div class="history-title"><span>Last ${historyRange} days</span><span>Click a day for details</span></div><div class="bars" style="--bar-count:${history.length}">${history.map((day) => { const event = (day.incidents || []).length > 0 || (day.maintenance || []).length > 0; const statusLabel = event ? 'Event' : stateLabel(day.status); return `<a class="bar ${event ? 'outage' : day.status}" href="#activity" data-site="${esc(site.key)}" data-date="${esc(day.date)}" title="${esc(day.date)}: ${esc(statusLabel)}" aria-label="${esc(label)} ${esc(day.date)} ${esc(statusLabel)}"></a>`; }).join('')}</div><div class="days" style="--bar-count:${history.length}">${history.map((day) => `<span>${esc(barLabel(day.date))}</span>`).join('')}</div></div></article>`;
     }).join('');
     document.querySelectorAll('.bar').forEach((bar) => bar.addEventListener('click', (event) => { event.preventDefault(); showActivity(bar.dataset.site, bar.dataset.date); }));
   }
@@ -71,7 +72,7 @@
   function showActivity(siteKey, date) {
     const siteIndex = snapshot.sites.findIndex((s) => s.key === siteKey);
     const site = siteIndex >= 0 ? snapshot.sites[siteIndex] : null;
-    const day = site?.history_7d?.find((d) => d.date === date);
+    const day = site?.history_daily?.find((d) => d.date === date) || site?.history_7d?.find((d) => d.date === date);
     if (!site || !day) return;
     $('activity').hidden = false;
     $('activity-title').textContent = `${siteLabel(site, siteIndex)} · Activity for ${barLabel(date)}`;
@@ -95,6 +96,11 @@
     $('history-archive').hidden = keys.length === 0;
     $('history-months').innerHTML = keys.map((key, index) => `<details class="history-month" ${index === 0 ? 'open' : ''}><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : maintenanceHistoryHtml(event)).join('')}</div></details>`).join('');
   }
+  function setHistoryRange(range) {
+    historyRange = [7, 30, 60].includes(Number(range)) ? Number(range) : 7;
+    document.querySelectorAll('.range-button').forEach((button) => { const active = Number(button.dataset.range) === historyRange; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); });
+    if (snapshot) renderStates(snapshot.sites || []);
+  }
   async function refresh() {
     try {
       const response = await fetch(`${cfg.apiBaseUrl.replace(/\/$/,'')}${cfg.apiPath}`, {headers:{Accept:'application/json'}});
@@ -116,5 +122,6 @@
   $('subscribe-open').addEventListener('click', openSubscribe);
   $('subscribe-close').addEventListener('click', () => { $('subscribe-modal').hidden = true; });
   $('subscribe-form').addEventListener('submit', submitSubscription);
+  document.querySelectorAll('.range-button').forEach((button) => button.addEventListener('click', () => setHistoryRange(button.dataset.range)));
   refresh(); setInterval(refresh, Number(cfg.pollMs) || 30000);
 })();

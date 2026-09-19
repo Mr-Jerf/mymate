@@ -56,13 +56,16 @@ class NetworkStatus
             return $end->greaterThan($start) ? $start->diffInSeconds($end) : 0;
         }));
         $key = hash('sha256', 'public-status-site:'.$site->id);
-        $history = collect(range(6, 0))->map(function (int $daysAgo) use ($site, $now, $historyIncidents, $historyMaintenance, $showSiteNames): array {
+        $history = collect(range(59, 0))->map(function (int $daysAgo) use ($site, $now, $historyIncidents, $historyMaintenance, $showSiteNames): array {
             $dayStart = $now->copy()->subDays($daysAgo)->startOfDay(); $dayEnd = $dayStart->copy()->endOfDay();
             $incidents = $historyIncidents->filter(fn (StatusIncident $incident): bool => $incident->site_id === $site->id && $incident->started_at <= $dayEnd && ($incident->resolved_at === null || $incident->resolved_at >= $dayStart));
             $maintenance = $historyMaintenance->filter(fn (MaintenanceWindow $window): bool => $window->starts_at <= $dayEnd && $window->ends_at >= $dayStart);
-            return ['date'=>$dayStart->toDateString(), 'status'=>$incidents->contains(fn ($i): bool => $i->severity === 'outage') ? 'outage' : ($incidents->isNotEmpty() ? 'degraded' : 'operational'), 'incidents'=>$incidents->map(fn ($i): array => $this->incidentPayload($i, $showSiteNames))->values()->all(), 'maintenance'=>$maintenance->map(fn ($w): array => $this->maintenancePayload($w, $now))->values()->all()];
-        })->values()->all();
-        return array_merge(['key'=>$key, 'state_code'=>$site->state_code, 'state_name'=>self::STATES[$site->state_code], 'status'=>$this->deviceStatus($devices), 'uptime_60d'=>$total > 0 && $unknown === 0 ? round(max(0, 100 - (($outageSeconds / ($windowSeconds * $total)) * 100)), 2) : null, 'history_7d'=>$history], $showSiteNames ? ['name'=>$site->name] : [], $showDeviceCounts ? ['monitored_devices'=>$total, 'down_devices'=>$down, 'unknown_devices'=>$unknown] : []);
+            $hasEvent = $incidents->isNotEmpty() || $maintenance->isNotEmpty();
+            return ['date'=>$dayStart->toDateString(), 'status'=>$hasEvent ? 'outage' : 'operational', 'incidents'=>$incidents->map(fn ($i): array => $this->historyIncidentPayload($i, $showSiteNames))->values()->all(), 'maintenance'=>$maintenance->map(fn ($w): array => $this->maintenancePayload($w, $now))->values()->all()];
+        })->values();
+        $history7 = $history->slice(-7)->values()->all();
+        $historyDaily = $history->all();
+        return array_merge(['key'=>$key, 'state_code'=>$site->state_code, 'state_name'=>self::STATES[$site->state_code], 'status'=>$this->deviceStatus($devices), 'uptime_60d'=>$total > 0 && $unknown === 0 ? round(max(0, 100 - (($outageSeconds / ($windowSeconds * $total)) * 100)), 2) : null, 'history_7d'=>$history7, 'history_daily'=>$historyDaily], $showSiteNames ? ['name'=>$site->name] : [], $showDeviceCounts ? ['monitored_devices'=>$total, 'down_devices'=>$down, 'unknown_devices'=>$unknown] : []);
     }
 
     private function deviceStatus($devices): string
