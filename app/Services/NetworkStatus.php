@@ -108,6 +108,10 @@ class NetworkStatus
             $siteId = (int) ($scope['site_id'] ?? 0);
             return in_array($siteId, array_map('intval', $publicSiteIds), true) ? [$siteId] : [];
         }
+        if ($type === 'sites') {
+            $selected = array_values(array_filter(array_map('intval', is_array($scope['site_ids'] ?? null) ? $scope['site_ids'] : [])));
+            return array_values(array_intersect(array_map('intval', $publicSiteIds), $selected));
+        }
         $deviceIds = DeviceScope::resolve($scope);
         if ($deviceIds === []) return [];
         return Device::query()->whereIn('id', $deviceIds)->whereIn('site_id', $publicSiteIds)->whereNotNull('site_id')->pluck('site_id')->map(fn ($id): int => (int) $id)->unique()->values()->all();
@@ -117,7 +121,7 @@ class NetworkStatus
     {
         return MaintenanceWindow::query()->where('enabled', true)->where('ends_at', '>', $from)->where('starts_at', '<=', $to)->orderBy('starts_at')->get()->filter(function (MaintenanceWindow $window): bool {
             $scope = $window->scope;
-            return ($scope === null || (is_array($scope) && in_array($scope['type'] ?? null, ['all', 'site', 'device_type', 'map', 'devices'], true))) && $this->maintenanceSiteIds($window) !== [];
+            return ($scope === null || (is_array($scope) && in_array($scope['type'] ?? null, ['all', 'site', 'sites', 'device_type', 'map', 'devices'], true))) && $this->maintenanceSiteIds($window) !== [];
         })->take(100);
     }
 

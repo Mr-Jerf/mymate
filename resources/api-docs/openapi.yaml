@@ -3162,8 +3162,9 @@ components:
       type: object
       description: Targeting rule shared by alert policies, sensors and maintenance windows.
       properties:
-        type: { type: string, enum: [all, site, device_type, map, devices] }
+        type: { type: string, enum: [all, site, sites, device_type, map, devices] }
         site_id: { type: integer, description: "When type=site." }
+        site_ids: { type: array, minItems: 1, items: { type: integer }, description: "When type=sites." }
         device_type: { type: string, enum: [router, switch, ap, server, internet, unknown], description: "When type=device_type." }
         map_id: { type: integer, description: "When type=map." }
         device_ids: { type: array, items: { type: integer }, description: "When type=devices." }
