@@ -69,7 +69,13 @@
     const status = ['scheduled', 'active', 'completed'].includes(maintenance.status) ? maintenance.status : 'scheduled';
     const label = status === 'active' ? 'In progress' : status[0].toUpperCase() + status.slice(1);
     const sites = Array.isArray(maintenance.sites) && maintenance.sites.length > 0 ? maintenance.sites.join(', ') : 'Public sites';
-    return `<details class="event maintenance-history maintenance-${status}" open><summary><strong>${esc(maintenance.overview)}</strong><span class="history-maintenance-status ${status}">${esc(label)}</span><span class="tag">Maintenance · ${esc(fmt(maintenance.starts_at))}</span></summary><p>Impacted sites: ${esc(sites)}</p><p>${esc(maintenance.description || 'Scheduled maintenance')}</p><p>${esc(fmt(maintenance.starts_at))} – ${esc(fmt(maintenance.ends_at))}</p></details>`;
+    const resolved = status === 'completed' ? '<span class="history-resolved">Resolved</span>' : '';
+    return `<details class="event maintenance-history maintenance-${status}" open><summary><strong>${esc(maintenance.overview)}</strong>${resolved}<span class="history-maintenance-status ${status}">${esc(label)}</span><span class="tag">Maintenance · ${esc(fmt(maintenance.starts_at))}</span></summary><p>Impacted sites: ${esc(sites)}</p><p>${esc(maintenance.description || 'Scheduled maintenance')}</p><p>${esc(fmt(maintenance.starts_at))} – ${esc(fmt(maintenance.ends_at))}</p></details>`;
+  }
+  function renderMaintenance(windows) {
+    const panel = $('maintenance-panel');
+    panel.hidden = !Array.isArray(windows) || windows.length === 0;
+    $('maintenance-list').innerHTML = (windows || []).map(maintenanceHistoryHtml).join('');
   }
   function showActivity(siteKey, date) {
     const siteIndex = snapshot.sites.findIndex((s) => s.key === siteKey);
@@ -116,7 +122,7 @@
       $('subscribe-open').hidden = presentation.allow_subscriptions === false || (snapshot.sites || []).length === 0;
       if (presentation.brand_name) { $('brand').textContent = presentation.brand_name; $('footer-brand').textContent = presentation.brand_name; }
       if (presentation.subtitle) $('subtitle').textContent = presentation.subtitle;
-      renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderHistory(snapshot.history_60d || []);
+      renderOverall(snapshot.overall); renderStates(snapshot.sites || []); renderMaintenance(snapshot.maintenance || []); renderHistory(snapshot.history_60d || []);
       $('last-checked').textContent = `Checked ${new Date().toLocaleTimeString()}`; $('error').hidden = true;
     } catch (error) { $('error').hidden = false; $('error').textContent = `Status data is temporarily unavailable. ${error.message}`; }
   }

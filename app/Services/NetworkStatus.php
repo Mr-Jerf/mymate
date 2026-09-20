@@ -32,10 +32,11 @@ class NetworkStatus
                     ->orWhere(fn ($nested) => $nested->whereNull('resolved_at')->orWhere('resolved_at', '>', $now->copy()->subDays(60)));
             })->with(['site', 'updates'])->get();
         $historyMaintenance = $this->maintenance($now->copy()->subDays(60), $now);
+        $activeMaintenance = $this->maintenance($now->copy()->subSeconds(1), $now)->filter(fn (MaintenanceWindow $window): bool => $window->starts_at <= $now && $window->ends_at > $now)->values();
         $settings = app(StatusPageSettings::class)->publicView();
         $showSiteNames = $settings['show_site_names'];
         $showDeviceCounts = $settings['show_device_counts'];
-        $publicSites = $sites->map(fn (Site $site): array => $this->siteSnapshot($site, $windowStart, $windowSeconds, $now, $historyIncidents, $historyMaintenance, $showSiteNames, $showDeviceCounts))->values()->all();
+        $publicSites = $sites->map(fn (Site $site): array => $this->siteSnapshot($site, $windowStart, $windowSeconds, $now, $historyIncidents, $historyMaintenance, $activeMaintenance, $showSiteNames, $showDeviceCounts))->values()->all();
         $maintenance = $this->maintenance($now->copy()->subDays(30), $now->copy()->addDays(30))->map(fn (MaintenanceWindow $window): array => $this->maintenancePayload($window, $now, $showSiteNames))->values()->all();
         $statusFeed = StatusIncident::query()->whereNotNull('site_id')->whereHas('site', fn ($query) => $query->whereIn('state_code', array_keys(self::STATES)))->where('started_at', '<', $now)
             ->where(fn ($q) => $q->whereNull('resolved_at')->orWhere('resolved_at', '>', $now->copy()->subDays(30)))
@@ -46,7 +47,7 @@ class NetworkStatus
         return ['overall' => ['status' => $overall, 'label' => match ($overall) { 'operational'=>'All systems operational', 'degraded'=>'Some systems are experiencing issues', 'outage'=>'A network outage is in progress', default=>'System status is currently unavailable' }], 'sites' => $publicSites, 'configuration' => app(StatusPageSettings::class)->publicView(), 'maintenance' => $maintenance, 'status_feed' => $statusFeed, 'history_60d' => $history60, 'generated_at' => $now->toISOString()];
     }
 
-    private function siteSnapshot(Site $site, $windowStart, int $windowSeconds, $now, $historyIncidents, $historyMaintenance, bool $showSiteNames, bool $showDeviceCounts): array
+    private function siteSnapshot(Site $site, $windowStart, int $windowSeconds, $now, $historyIncidents, $historyMaintenance, $activeMaintenance, bool $showSiteNames, bool $showDeviceCounts): array
     {
         $devices = $site->devices;
         $total = $devices->count();
@@ -67,7 +68,8 @@ class NetworkStatus
         })->values();
         $history7 = $history->slice(-7)->values()->all();
         $historyDaily = $history->all();
-        return array_merge(['key'=>$key, 'state_code'=>$site->state_code, 'state_name'=>self::STATES[$site->state_code], 'status'=>$this->deviceStatus($devices), 'uptime_60d'=>$total > 0 && $unknown === 0 ? round(max(0, 100 - (($outageSeconds / ($windowSeconds * $total)) * 100)), 2) : null, 'history_7d'=>$history7, 'history_daily'=>$historyDaily], $showSiteNames ? ['name'=>$site->name] : [], $showDeviceCounts ? ['monitored_devices'=>$total, 'down_devices'=>$down, 'unknown_devices'=>$unknown] : []);
+        $status = $activeMaintenance->contains(fn (MaintenanceWindow $window): bool => $this->maintenanceAffectsSite($window, $site->id)) ? 'operational' : $this->deviceStatus($devices);
+        return array_merge(['key'=>$key, 'state_code'=>$site->state_code, 'state_name'=>self::STATES[$site->state_code], 'status'=>$status, 'uptime_60d'=>$total > 0 && $unknown === 0 ? round(max(0, 100 - (($outageSeconds / ($windowSeconds * $total)) * 100)), 2) : null, 'history_7d'=>$history7, 'history_daily'=>$historyDaily], $showSiteNames ? ['name'=>$site->name] : [], $showDeviceCounts ? ['monitored_devices'=>$total, 'down_devices'=>$down, 'unknown_devices'=>$unknown] : []);
     }
 
     private function deviceStatus($devices): string
