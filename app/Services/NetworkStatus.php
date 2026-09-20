@@ -37,7 +37,7 @@ class NetworkStatus
         $showSiteNames = $settings['show_site_names'];
         $showDeviceCounts = $settings['show_device_counts'];
         $publicSites = $sites->map(fn (Site $site): array => $this->siteSnapshot($site, $windowStart, $windowSeconds, $now, $historyIncidents, $historyMaintenance, $activeMaintenance, $showSiteNames, $showDeviceCounts))->values()->all();
-        $maintenance = $this->maintenance($now->copy()->subDays(30), $now->copy()->addDays(30))->map(fn (MaintenanceWindow $window): array => $this->maintenancePayload($window, $now, $showSiteNames))->values()->all();
+        $maintenance = $this->maintenance($now->copy()->subDays(7), $now->copy()->addDays(30))->map(fn (MaintenanceWindow $window): array => $this->maintenancePayload($window, $now, $showSiteNames))->values()->all();
         $statusFeed = StatusIncident::query()->whereNotNull('site_id')->whereHas('site', fn ($query) => $query->whereIn('state_code', array_keys(self::STATES)))->where('started_at', '<', $now)
             ->where(fn ($q) => $q->whereNull('resolved_at')->orWhere('resolved_at', '>', $now->copy()->subDays(30)))
             ->with(['site', 'updates'])->orderByDesc('started_at')->limit(100)->get()
