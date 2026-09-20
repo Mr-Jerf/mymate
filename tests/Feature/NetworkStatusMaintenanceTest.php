@@ -95,24 +95,33 @@ class NetworkStatusMaintenanceTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.status_feed', []);
     }
-    public function test_public_status_shows_recent_maintenance_and_hides_older_windows(): void
+    public function test_public_status_shows_recent_maintenance_in_panel_and_keeps_older_windows_in_history(): void
     {
+        Site::factory()->create(['state_code' => 'UT']);
         MaintenanceWindow::factory()->create([
             'name' => 'Recent completed upgrade',
+            'starts_at' => now()->subDays(3),
+            'ends_at' => now()->subDays(2),
+            'scope' => null,
+        ]);
+        MaintenanceWindow::factory()->create([
+            'name' => 'Older completed upgrade',
             'starts_at' => now()->subDays(10),
             'ends_at' => now()->subDays(9),
             'scope' => null,
         ]);
         MaintenanceWindow::factory()->create([
             'name' => 'Expired notice',
-            'starts_at' => now()->subDays(31),
-            'ends_at' => now()->subDays(30)->subMinute(),
+            'starts_at' => now()->subDays(61),
+            'ends_at' => now()->subDays(60)->subMinute(),
             'scope' => null,
         ]);
 
         $this->withHeader('X-Status-Api-Key', 'test-token')->getJson('/api/public/status')
             ->assertOk()
             ->assertJsonFragment(['overview' => 'Recent completed upgrade', 'status' => 'completed'])
+            ->assertJsonCount(1, 'data.maintenance')
+            ->assertJsonFragment(['overview' => 'Older completed upgrade', 'event_type' => 'maintenance'])
             ->assertJsonMissing(['overview' => 'Expired notice']);
     }
 }
