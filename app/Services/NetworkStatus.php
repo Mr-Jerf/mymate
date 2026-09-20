@@ -63,8 +63,7 @@ class NetworkStatus
             $dayStart = $now->copy()->subDays($daysAgo)->startOfDay(); $dayEnd = $dayStart->copy()->endOfDay();
             $incidents = $historyIncidents->filter(fn (StatusIncident $incident): bool => $incident->site_id === $site->id && $incident->started_at <= $dayEnd && ($incident->resolved_at === null || $incident->resolved_at >= $dayStart));
             $maintenance = $historyMaintenance->filter(fn (MaintenanceWindow $window): bool => $window->starts_at <= $dayEnd && $window->ends_at >= $dayStart && $this->maintenanceAffectsSite($window, $site->id));
-            $hasEvent = $incidents->isNotEmpty() || $maintenance->isNotEmpty();
-            return ['date'=>$dayStart->toDateString(), 'status'=>$hasEvent ? 'outage' : 'operational', 'incidents'=>$incidents->map(fn ($i): array => $this->historyIncidentPayload($i, $showSiteNames))->values()->all(), 'maintenance'=>$maintenance->map(fn ($w): array => $this->maintenancePayload($w, $now, $showSiteNames))->values()->all()];
+            return ['date'=>$dayStart->toDateString(), 'status'=>$incidents->isNotEmpty() ? 'outage' : ($maintenance->isNotEmpty() ? 'maintenance' : 'operational'), 'incidents'=>$incidents->map(fn ($i): array => $this->historyIncidentPayload($i, $showSiteNames))->values()->all(), 'maintenance'=>$maintenance->map(fn ($w): array => $this->maintenancePayload($w, $now, $showSiteNames))->values()->all()];
         })->values();
         $history7 = $history->slice(-7)->values()->all();
         $historyDaily = $history->all();
