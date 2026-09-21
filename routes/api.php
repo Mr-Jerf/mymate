@@ -71,6 +71,8 @@ Route::get('public/status', NetworkStatusController::class)
 Route::post('public/status-subscriptions', [StatusSubscriptionController::class, 'store'])->middleware('throttle:5,1')->name('public.status-subscriptions.store');
 Route::get('public/status-subscriptions/verify/{token}', [StatusSubscriptionController::class, 'verify'])->middleware('throttle:20,1')->name('public.status-subscriptions.verify');
 Route::get('public/status-subscriptions/unsubscribe/{token}', [StatusSubscriptionController::class, 'unsubscribe'])->middleware('throttle:20,1')->name('public.status-subscriptions.unsubscribe');
+Route::get('public/status-subscriptions/manage/{token}', [StatusSubscriptionController::class, 'manage'])->middleware('throttle:20,1')->name('public.status-subscriptions.manage');
+Route::post('public/status-subscriptions/manage/{token}', [StatusSubscriptionController::class, 'updatePreferences'])->middleware('throttle:10,1')->name('public.status-subscriptions.manage.update');
 
 // no-login view of one map. Token-gated, read-only, and rate-limited. The payload is a
 // whitelist - no addresses or credentials cross this boundary (see PublicWallController).

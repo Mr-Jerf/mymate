@@ -39,7 +39,11 @@ class SendStatusNotification implements ShouldQueue
         $delivery->increment('attempts');
         $email = Crypt::decryptString($subscription->email_ciphertext);
         $mailer = $mail->apply();
-        Mail::mailer($mailer)->raw($this->body, fn ($message) => $message->to($email)->subject($this->subject));
+        $statusPageUrl = rtrim((string) config('services.status_page.url'), '/');
+        $manageUrl = $statusPageUrl.'/api/public/status-subscriptions/manage/'.$subscription->unsubscribe_hash;
+        $unsubscribeUrl = $statusPageUrl.'/api/public/status-subscriptions/unsubscribe/'.$subscription->unsubscribe_hash;
+        $body = $this->body."\n\nManage notification preferences: {$manageUrl}\nUnsubscribe from all notifications: {$unsubscribeUrl}";
+        Mail::mailer($mailer)->raw($body, fn ($message) => $message->to($email)->subject($this->subject));
         $delivery->update(['status' => 'sent', 'sent_at' => now(), 'last_error' => null]);
     }
 

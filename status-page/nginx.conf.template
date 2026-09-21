@@ -32,6 +32,12 @@ server {
     proxy_ssl_server_name on;
   }
 
+  location ^~ /api/public/status-subscriptions/manage/ {
+    proxy_pass ${MYMATE_API_URL};
+    proxy_set_header Accept "text/html";
+    proxy_ssl_server_name on;
+  }
+
   location / { try_files $uri $uri/ /index.html; }
   add_header Cache-Control "no-cache" always;
 }
