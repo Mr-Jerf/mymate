@@ -93,7 +93,7 @@ function MailServerSection() {
     const { data: mail } = useMailSettings();
     const update = useUpdateMailSettings();
     const test = useTestMail();
-    const [form, setForm] = useState<MailSettingsInput>({ host: '', port: 587, encryption: 'tls', username: '', from_address: '', from_name: 'My Mate' });
+    const [form, setForm] = useState<MailSettingsInput>({ host: '', port: 587, encryption: 'tls', username: '', from_address: '', from_name: 'Network Status' });
     const [password, setPassword] = useState('');
     const [testTo, setTestTo] = useState('');
 

@@ -145,8 +145,8 @@ class MailSettings
     {
         $mailer = $this->apply();
         Mail::mailer($mailer)->raw(
-            'This is a test email from My Mate. If you received it, your outgoing mail server is configured correctly.',
-            fn ($m) => $m->to($to)->subject('My Mate - test email'),
+            'This is a test email from Network Status. If you received it, your outgoing mail server is configured correctly.',
+            fn ($m) => $m->to($to)->subject('Network Status - test email'),
         );
     }
 }
