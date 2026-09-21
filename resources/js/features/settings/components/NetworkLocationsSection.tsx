@@ -155,7 +155,7 @@ export function NetworkLocationsSection() {
                                 <option value="">Unassigned</option>
                                 {STATES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
                             </select>
-                            <button type="button" aria-label={`Delete ${site.name}`} disabled={remove.isPending} onClick={() => { if (window.confirm(`Delete site “${site.name}”? This is allowed only when no devices are assigned.`)) remove.mutate(site.id); }} className="shrink-0 rounded p-1 text-red-300/70 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-40"><Trash weight="bold" className="h-4 w-4" /></button>
+                            <button type="button" aria-label={`Delete ${site.name}`} disabled={remove.isPending} onClick={() => { if (window.confirm(`Delete site “${site.name}”? This is allowed only when no devices, topology links, or subscriptions are assigned.`)) remove.mutate(site.id); }} className="shrink-0 rounded p-1 text-red-300/70 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-40"><Trash weight="bold" className="h-4 w-4" /></button>
                         </div>;
                     })}
                     {!sites?.length && <p className="text-sm text-white/40">No sites have been created yet.</p>}
