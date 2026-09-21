@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'status_page' => [
+        'url' => env('STATUS_PAGE_URL', 'https://status.z4tek.com'),
+    ],
+
 ];

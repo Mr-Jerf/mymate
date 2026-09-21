@@ -40,7 +40,10 @@ class StatusSubscriptionController extends Controller
         }
         try {
             $mailer = app(MailSettings::class)->apply();
-            Mail::mailer($mailer)->raw("Confirm your My Mate status subscription for {$site->name}: ".url('/api/public/status-subscriptions/verify/'.$verification)."\n\nUnsubscribe: ".url('/api/public/status-subscriptions/unsubscribe/'.$unsubscribe), fn ($message) => $message->to($email)->subject('Confirm My Mate status notifications'));
+            $statusPageUrl = rtrim((string) config('services.status_page.url'), '/');
+            $verificationUrl = $statusPageUrl.'/api/public/status-subscriptions/verify/'.$verification;
+            $unsubscribeUrl = $statusPageUrl.'/api/public/status-subscriptions/unsubscribe/'.$unsubscribe;
+            Mail::mailer($mailer)->raw("Confirm your Network status notifications subscription for {$site->name}: {$verificationUrl}\n\nUnsubscribe: {$unsubscribeUrl}", fn ($message) => $message->to($email)->subject('Confirm Network status notifications'));
         } catch (\Throwable) {
             // Keep the public response neutral; the delivery failure is handled by mail logs/ops.
         }
