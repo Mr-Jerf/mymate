@@ -12,7 +12,7 @@ class StatusNotificationDispatcher
     public function incidentStarted(StatusIncident $incident): void
     {
         $severity = $incident->severity;
-        $this->dispatch($incident->site, $severity, $incident->id.':started', ucfirst($severity).' service at '.$incident->site?->name, "A {$severity} condition has been reported at {$incident->site?->name}. My Mate is monitoring the incident and will send further updates.");
+        $this->dispatch($incident->site, $severity, $incident->id.':started', ucfirst($severity).' service at '.$incident->site?->name, "A {$severity} condition has been reported at {$incident->site?->name}. Network Status is monitoring the incident and will send further updates.");
     }
 
     public function incidentUpdate(StatusIncident $incident, int $updateId, string $message): void
