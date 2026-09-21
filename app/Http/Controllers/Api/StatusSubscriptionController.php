@@ -64,7 +64,7 @@ class StatusSubscriptionController extends Controller
 
     public function unsubscribe(string $token): Response
     {
-        $subscription = StatusSubscription::where('unsubscribe_hash', hash('sha256', $token))->first();
+        $subscription = $this->subscriptionForUnsubscribeToken($token);
         if ($subscription === null) {
             return $this->subscriptionPage('Link unavailable', 'This unsubscribe link is invalid or has already been used.', 404);
         }
@@ -74,7 +74,7 @@ class StatusSubscriptionController extends Controller
 
     public function manage(string $token): Response
     {
-        $subscription = StatusSubscription::where('unsubscribe_hash', hash('sha256', $token))->first();
+        $subscription = $this->subscriptionForUnsubscribeToken($token);
         if ($subscription === null) {
             return $this->subscriptionPage('Link unavailable', 'This preferences link is invalid or has already been used.', 404);
         }
@@ -84,7 +84,7 @@ class StatusSubscriptionController extends Controller
 
     public function updatePreferences(Request $request, string $token): Response
     {
-        $subscription = StatusSubscription::where('unsubscribe_hash', hash('sha256', $token))->first();
+        $subscription = $this->subscriptionForUnsubscribeToken($token);
         if ($subscription === null) {
             return $this->subscriptionPage('Link unavailable', 'This preferences link is invalid or has already been used.', 404);
         }
@@ -99,6 +99,14 @@ class StatusSubscriptionController extends Controller
         $subscription->update(['preferences' => collect(['outage', 'degraded', 'updates', 'resolved', 'maintenance'])->mapWithKeys(fn (string $key): array => [$key => (bool) ($preferences[$key] ?? false)])->all()]);
 
         return $this->subscriptionPage('Preferences saved', 'Your Network status notification preferences have been updated.');
+    }
+
+    private function subscriptionForUnsubscribeToken(string $token): ?StatusSubscription
+    {
+        $hash = hash('sha256', $token);
+        return StatusSubscription::query()->where(function ($query) use ($token, $hash): void {
+            $query->where('unsubscribe_hash', $hash)->orWhere('unsubscribe_hash', $token);
+        })->first();
     }
 
     /** @param array<string, mixed> $preferences */
