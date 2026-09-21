@@ -8,6 +8,7 @@ use App\Models\Site;
 use App\Models\StatusSubscription;
 use App\Support\StatusPageSettings;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -50,17 +51,41 @@ class StatusSubscriptionController extends Controller
         return response()->json(['message' => 'If eligible, a confirmation email will be sent.'], 202);
     }
 
-    public function verify(string $token): JsonResponse
+    public function verify(string $token): Response
     {
-        $subscription = StatusSubscription::where('verification_hash', hash('sha256', $token))->firstOrFail();
+        $subscription = StatusSubscription::where('verification_hash', hash('sha256', $token))->first();
+        if ($subscription === null) {
+            return $this->subscriptionPage('Link unavailable', 'This confirmation link is invalid or has already been used.', 404);
+        }
         $subscription->update(['verified_at' => now(), 'verification_hash' => null, 'unsubscribed_at' => null]);
-        return response()->json(['message' => 'Subscription confirmed.']);
+        return $this->subscriptionPage('Subscription confirmed', 'You’re all set to receive Network status notifications.');
     }
 
-    public function unsubscribe(string $token): JsonResponse
+    public function unsubscribe(string $token): Response
     {
-        $subscription = StatusSubscription::where('unsubscribe_hash', hash('sha256', $token))->firstOrFail();
+        $subscription = StatusSubscription::where('unsubscribe_hash', hash('sha256', $token))->first();
+        if ($subscription === null) {
+            return $this->subscriptionPage('Link unavailable', 'This unsubscribe link is invalid or has already been used.', 404);
+        }
         $subscription->update(['unsubscribed_at' => now()]);
-        return response()->json(['message' => 'You have been unsubscribed from status notifications.']);
+        return $this->subscriptionPage('You’ve been unsubscribed', 'You will no longer receive Network status notifications for this subscription.');
+    }
+
+    private function subscriptionPage(string $title, string $message, int $status = 200): Response
+    {
+        $safeTitle = e($title);
+        $safeMessage = e($message);
+        $html = <<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{$safeTitle} · Network Status</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#070a12;color:#f8fafc;font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}.card{width:min(520px,100%);padding:36px 30px;border:1px solid #27344b;border-radius:20px;background:#101827;box-shadow:0 24px 70px #0008;text-align:center}.mark{width:52px;height:52px;margin:0 auto 18px;display:grid;place-items:center;border-radius:50%;background:#34d39922;color:#34d399;font-size:28px}.card h1{margin:0;font-size:24px;letter-spacing:-.03em}.card p{margin:12px 0 0;color:#aab7cb}.brand{margin-top:26px;color:#64748b;font-size:12px}
+</style>
+</head><body><main class="card"><div class="mark" aria-hidden="true">✓</div><h1>{$safeTitle}</h1><p>{$safeMessage}</p><div class="brand">Network Status</div></main></body></html>
+HTML;
+        return response($html, $status)->header('Content-Type', 'text/html; charset=UTF-8')->header('Cache-Control', 'no-store');
     }
 }
