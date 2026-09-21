@@ -67,7 +67,7 @@ class SiteApiTest extends TestCase
 
         $this->deleteJson("/api/sites/{$site->id}")
             ->assertStatus(409)
-            ->assertJsonPath('message', 'This site cannot be deleted while devices are assigned to it. Reassign the devices first.');
+            ->assertJsonPath('message', 'This site cannot be deleted while it has assigned devices, topology links, or subscriptions.');
 
         $this->assertDatabaseHas('sites', ['id' => $site->id]);
         $this->assertDatabaseHas('devices', ['id' => $device->id, 'site_id' => $site->id]);
