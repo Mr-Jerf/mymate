@@ -111,7 +111,7 @@ class SendAlert
             // Use the operator's SMTP server when configured; else the
             // default mailer (env). apply() returns the mailer name or null (= default).
             TransportType::Email => Mail::mailer($this->mail->apply())->raw($message, function ($m) use ($config): void {
-                $m->to($config['email'])->subject('My Mate alert');
+                $m->to($config['email'])->subject('Network Status alert');
             }),
             // Slack, Teams, Messenger and a generic Webhook all take an incoming webhook that
             // accepts a {"text": ...} POST - one path for every such URL transport.
@@ -176,7 +176,7 @@ class SendAlert
             'event_action' => 'trigger',
             'payload' => [
                 'summary' => mb_substr($message, 0, 1024),
-                'source' => 'My Mate',
+                'source' => 'Network Status',
                 'severity' => 'error',
             ],
         ])->throw();

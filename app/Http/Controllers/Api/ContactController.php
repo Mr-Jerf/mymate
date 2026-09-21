@@ -34,13 +34,13 @@ class ContactController extends Controller
         $to = (string) config('mymate.demo.contact_to');
         if ($to !== '') {
             try {
-                $body = "New My Mate enquiry\n\n"
+                $body = "New Network Status enquiry\n\n"
                     ."Name: {$data['name']}\n"
                     ."Email: {$data['email']}\n"
                     .'Company: '.($data['company'] ?: '-')."\n\n"
                     .$data['message'];
                 Mail::raw($body, function ($m) use ($to, $data): void {
-                    $m->to($to)->subject('My Mate enquiry from '.$data['name'])->replyTo($data['email'], $data['name']);
+                    $m->to($to)->subject('Network Status enquiry from '.$data['name'])->replyTo($data['email'], $data['name']);
                 });
             } catch (\Throwable $e) {
                 // Lead is already logged - a mail-transport failure must not fail the form.

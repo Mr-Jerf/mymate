@@ -75,7 +75,7 @@ class AlertTransportController extends Controller
     public function test(AlertTransport $transport, SendAlert $sender): JsonResponse
     {
         try {
-            $sender->deliver($transport, 'My Mate test alert - this transport is working.');
+            $sender->deliver($transport, 'Network Status test alert - this transport is working.');
 
             return response()->json(['ok' => true]);
         } catch (\Throwable) {
