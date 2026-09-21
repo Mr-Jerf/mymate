@@ -15,6 +15,12 @@ server {
     proxy_set_header Accept "application/json";
     proxy_ssl_server_name on;
   }
+  location = /api/public/status-subscriptions {
+    proxy_pass ${MYMATE_API_URL}/api/public/status-subscriptions;
+    proxy_set_header Accept "application/json";
+    proxy_set_header Content-Type "application/json";
+    proxy_ssl_server_name on;
+  }
   location / { try_files $uri $uri/ /index.html; }
   add_header Cache-Control "no-cache" always;
 }
