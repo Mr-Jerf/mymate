@@ -9,6 +9,7 @@ use App\Http\Resources\SiteResource;
 use App\Models\Site;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
+use Illuminate\Http\JsonResponse;
 
 /**
  * Sites: the physical locations gear lives at. Read is open to any operator; writes are
@@ -49,12 +50,14 @@ class SiteController extends Controller
         return new SiteResource($site->loadCount('devices'));
     }
 
-    /**
-     * Deleting a site nulls its devices' site_id (FK nullOnDelete) rather than removing them -
-     * losing a tower record must never take the gear monitoring with it.
-     */
-    public function destroy(Site $site): Response
+    public function destroy(Site $site): Response|JsonResponse
     {
+        if ($site->devices()->exists()) {
+            return response()->json([
+                'message' => 'This site cannot be deleted while devices are assigned to it. Reassign the devices first.',
+            ], 409);
+        }
+
         $site->delete();
 
         return response()->noContent();

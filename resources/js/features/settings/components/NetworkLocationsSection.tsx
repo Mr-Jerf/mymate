@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { MapPin, Plus, X, PencilSimple, Check } from '@phosphor-icons/react';
+import { MapPin, Plus, X, PencilSimple, Check, Trash } from '@phosphor-icons/react';
 import { apiClient } from '../../../lib/apiClient';
 import { pushToast } from '../../../lib/toast';
 
@@ -66,6 +66,17 @@ export function NetworkLocationsSection() {
             pushToast({ title: 'Site created', tone: 'up' });
         },
         onError: () => pushToast({ title: "Couldn't create site", tone: 'down' }),
+    });
+    const remove = useMutation({
+        mutationFn: async (id: number) => apiClient.delete(`/sites/${id}`),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ['sites'] });
+            pushToast({ title: 'Site deleted', tone: 'up' });
+        },
+        onError: (error: unknown) => {
+            const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+            pushToast({ title: message || "Couldn't delete site", tone: 'down' });
+        },
     });
     const [editingSiteId, setEditingSiteId] = useState<number | null>(null);
     const [siteNameDraft, setSiteNameDraft] = useState('');
@@ -144,6 +155,7 @@ export function NetworkLocationsSection() {
                                 <option value="">Unassigned</option>
                                 {STATES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
                             </select>
+                            <button type="button" aria-label={`Delete ${site.name}`} disabled={remove.isPending} onClick={() => { if (window.confirm(`Delete site “${site.name}”? This is allowed only when no devices are assigned.`)) remove.mutate(site.id); }} className="shrink-0 rounded p-1 text-red-300/70 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-40"><Trash weight="bold" className="h-4 w-4" /></button>
                         </div>;
                     })}
                     {!sites?.length && <p className="text-sm text-white/40">No sites have been created yet.</p>}
