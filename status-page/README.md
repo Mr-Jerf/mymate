@@ -68,6 +68,14 @@ Keep `status.env` outside Git. The `.gitignore` should continue to exclude local
 
 From this directory:
 
+To validate the Compose file without creating a real secret file, run from this directory:
+
+```bash
+STATUS_ENV_FILE=./status.env.example docker compose --env-file status.env.example config --quiet
+```
+
+For the actual container, use the copied protected file:
+
 ```bash
 docker compose --env-file status.env up -d --build
 ```
