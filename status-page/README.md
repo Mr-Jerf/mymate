@@ -58,6 +58,7 @@ Set:
 - `STATUS_BRAND_NAME` — name shown in the page header and footer.
 - `STATUS_SUBTITLE` — short description below the name.
 - `STATUS_POLL_MS` — browser refresh interval, normally `30000`.
+- `STATUS_PUBLIC_ORIGIN` — the public HTTPS origin used by the bundled HTTP-to-HTTPS redirect, for example `https://status.example.com`.
 - `MYMATE_API_URL` — the MyMate origin reachable from the status container.
 - `MYMATE_STATUS_TOKEN` — exactly the same dedicated token as MyMate's `STATUS_API_TOKEN`.
 

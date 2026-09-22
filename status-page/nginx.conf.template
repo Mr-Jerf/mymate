@@ -1,7 +1,7 @@
 server {
   listen 8080;
   server_name _;
-  return 301 https://status.z4tek.com$request_uri;
+  return 301 ${STATUS_PUBLIC_ORIGIN}$request_uri;
 }
 
 server {
