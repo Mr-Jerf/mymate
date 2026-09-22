@@ -2261,6 +2261,7 @@ paths:
                             state_name: { type: string }
                             status: { type: string, enum: [operational, degraded, outage, unknown] }
                             uptime_60d: { type: number, format: float, nullable: true, minimum: 0, maximum: 100 }
+                            impact_percent: { type: number, format: float, nullable: true, minimum: 0, maximum: 100, description: Aggregate percentage of monitored service points currently down; counts remain hidden when device-count visibility is disabled }
                             monitored_devices: { type: integer, minimum: 0, description: Present only when public device-count visibility is enabled }
                             down_devices: { type: integer, minimum: 0, description: Present only when public device-count visibility is enabled }
                             unknown_devices: { type: integer, minimum: 0, description: Present only when public device-count visibility is enabled }

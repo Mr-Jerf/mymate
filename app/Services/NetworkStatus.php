@@ -68,7 +68,7 @@ class NetworkStatus
         $history7 = $history->slice(-7)->values()->all();
         $historyDaily = $history->all();
         $status = $activeMaintenance->contains(fn (MaintenanceWindow $window): bool => $this->maintenanceAffectsSite($window, $site->id)) ? 'operational' : $this->deviceStatus($devices);
-        return array_merge(['key'=>$key, 'state_code'=>$site->state_code, 'state_name'=>self::STATES[$site->state_code], 'status'=>$status, 'uptime_60d'=>$total > 0 && $unknown === 0 ? round(max(0, 100 - (($outageSeconds / ($windowSeconds * $total)) * 100)), 2) : null, 'history_7d'=>$history7, 'history_daily'=>$historyDaily], $showSiteNames ? ['name'=>$site->name] : [], $showDeviceCounts ? ['monitored_devices'=>$total, 'down_devices'=>$down, 'unknown_devices'=>$unknown] : []);
+        return array_merge(['key'=>$key, 'state_code'=>$site->state_code, 'state_name'=>self::STATES[$site->state_code], 'status'=>$status, 'uptime_60d'=>$total > 0 && $unknown === 0 ? round(max(0, 100 - (($outageSeconds / ($windowSeconds * $total)) * 100)), 2) : null, 'impact_percent'=>$total > 0 && $down > 0 ? round(($down / $total) * 100, 1) : null, 'history_7d'=>$history7, 'history_daily'=>$historyDaily], $showSiteNames ? ['name'=>$site->name] : [], $showDeviceCounts ? ['monitored_devices'=>$total, 'down_devices'=>$down, 'unknown_devices'=>$unknown] : []);
     }
 
     private function deviceStatus($devices): string
