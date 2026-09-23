@@ -74,6 +74,22 @@ jobs:
       - name: Run tests
         run: php artisan test
 
+  # ------------------------------------------------ status page
+  status-page:
+    name: Status page - build + Compose contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate standalone Compose configuration
+        working-directory: status-page
+        run: STATUS_ENV_FILE=./status.env.example docker compose --env-file status.env.example config --quiet
+      - name: Validate JavaScript syntax
+        run: node --check status-page/app.js
+      - name: Validate root status-page profile
+        run: STATUS_API_TOKEN=ci-status-token docker compose -f docker-compose.yml -f docker-compose.status-page.yml --profile status-page config --quiet
+      - name: Build status-page image
+        run: docker build --tag mymate-status-page:ci ./status-page
+
   # ---------------------------------------------------------------- .deb
   build-deb:
     name: Build .deb

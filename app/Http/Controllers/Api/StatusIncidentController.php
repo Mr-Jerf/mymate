@@ -16,7 +16,7 @@ class StatusIncidentController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $query = StatusIncident::query()->latest('started_at')->limit(100);
+        $query = StatusIncident::query()->with('acknowledgedBy')->latest('started_at')->limit(100);
         if ($request->user()?->isRestricted()) {
             $query->whereHas('outages', fn ($outages): mixed => $outages->whereIn('device_id', $request->user()->visibleDeviceIds()));
         }
@@ -43,6 +43,17 @@ class StatusIncidentController extends Controller
         }
         $statusIncident->update($data);
         return new StatusIncidentResource($statusIncident->refresh());
+    }
+
+    public function acknowledge(Request $request, StatusIncident $statusIncident): StatusIncidentResource
+    {
+        abort_unless($request->user()?->isAdmin(), 403, 'Administrator access required.');
+        $statusIncident->forceFill([
+            'acknowledged_at' => now(),
+            'acknowledged_by_id' => $request->user()->id,
+        ])->save();
+
+        return new StatusIncidentResource($statusIncident->load('acknowledgedBy'));
     }
 
     public function updates(Request $request, StatusIncident $statusIncident): AnonymousResourceCollection

@@ -319,6 +319,7 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
 
     Route::get('status-incidents', [StatusIncidentController::class, 'index'])->name('status-incidents.index');
     Route::patch('status-incidents/{statusIncident}', [StatusIncidentController::class, 'update'])->name('status-incidents.update');
+    Route::post('status-incidents/{statusIncident}/acknowledge', [StatusIncidentController::class, 'acknowledge'])->middleware('throttle:30,1')->name('status-incidents.acknowledge');
     Route::get('status-incidents/{statusIncident}/updates', [StatusIncidentController::class, 'updates'])->name('status-incidents.updates.index');
     Route::post('status-incidents/{statusIncident}/updates', [StatusIncidentController::class, 'storeUpdate'])->middleware('throttle:30,1')->name('status-incidents.updates.store');
     // Outage timeline - ?device_id= , ?state=open|closed.

@@ -98,8 +98,22 @@ Start with the complete [status-page setup guide](status-page/README.md). In bri
    **Settings → Network status**.
 3. Copy [`status-page/status.env.example`](status-page/status.env.example) to `status.env`,
    set the matching `MYMATE_STATUS_TOKEN`, and keep the file mode `600`.
-4. Run `docker compose --env-file status.env up -d --build` from `status-page/`.
+4. Run the standalone container with `docker compose --env-file status.env up -d --build` from
+   `status-page/`, or use the root Compose profile below.
 5. Put HTTPS/reverse-proxy or tunnel access in front of the loopback-bound status container.
+
+For a single Compose project using the MyMate app network:
+
+```bash
+export STATUS_API_TOKEN="$(openssl rand -hex 32)"
+export STATUS_PUBLIC_ORIGIN=https://status.example.com
+docker compose -f docker-compose.yml -f docker-compose.status-page.yml \
+  --profile status-page up -d --build
+```
+
+The profile connects the status container to MyMate internally at `http://app`; do not expose
+`STATUS_API_TOKEN` to browser configuration. Use the standalone setup when MyMate and the status
+page run on different hosts.
 
 The browser calls only the status page's same-origin `/api/status` proxy; the private MyMate token
 is never placed in browser JavaScript or public configuration.

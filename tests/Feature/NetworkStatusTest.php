@@ -13,6 +13,28 @@ class NetworkStatusTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_admin_can_acknowledge_a_status_incident(): void
+    {
+        $admin = $this->actingAsUser();
+        $incident = StatusIncident::create([
+            'state_code' => 'UT',
+            'severity' => 'outage',
+            'status' => 'investigating',
+            'summary' => 'Provider interruption',
+            'started_at' => now()->subMinutes(15),
+        ]);
+
+        $this->postJson("/api/status-incidents/{$incident->id}/acknowledge")
+            ->assertOk()
+            ->assertJsonPath('data.acknowledged', true)
+            ->assertJsonPath('data.acknowledged_by', $admin->name);
+
+        $this->assertDatabaseHas('status_incidents', [
+            'id' => $incident->id,
+            'acknowledged_by_id' => $admin->id,
+        ]);
+    }
+
     public function test_admin_can_assign_a_site_to_a_state(): void
     {
         $this->actingAsUser();

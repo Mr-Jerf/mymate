@@ -107,6 +107,18 @@ curl -fsS -o /dev/null -w 'status=%{http_code}\n' https://status.example.com/api
 
 Expected values are `200` for both. HTTP should redirect to HTTPS if your reverse proxy is configured to do so. A direct request to MyMate's protected public-status endpoint without its header must remain unauthorized.
 
+## Preview with synthetic data
+
+The container includes a safe, clearly labeled synthetic preview. It never calls MyMate and contains no credentials:
+
+```text
+https://status.example.com/?preview=1
+```
+
+For a local preview, start the standalone container and open `http://127.0.0.1:8788/?preview=1`. The blue Preview data banner means the page is not connected to live monitoring. The fixture demonstrates operational, degraded, resolved outage, maintenance, and same-day outage-plus-maintenance history states.
+
+The fixture is stored in `preview-data.json` and is copied into the image as a static asset. Replace it only with non-sensitive synthetic data when creating a branded demo; never put a real API response, token, device name, or customer information in the fixture.
+
 ## Optional subscriptions
 
 If subscriptions are enabled in MyMate, the status-page proxy supports the public subscription POST endpoint and the verification, unsubscribe, and preference-management links used in notification emails. Responses are intentionally neutral to avoid email enumeration, and subscribers must confirm by email.

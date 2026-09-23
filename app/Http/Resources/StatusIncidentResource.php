@@ -17,6 +17,9 @@ class StatusIncidentResource extends JsonResource
             'summary' => $this->summary,
             'started_at' => $this->started_at?->toIso8601String(),
             'resolved_at' => $this->resolved_at?->toIso8601String(),
+            'acknowledged' => $this->acknowledged_at !== null,
+            'acknowledged_at' => $this->acknowledged_at?->toIso8601String(),
+            'acknowledged_by' => $this->acknowledgedBy?->name,
         ];
     }
 }

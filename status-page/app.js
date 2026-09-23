@@ -8,6 +8,7 @@
   const monthLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'long',year:'numeric'});
   const barLabel = (date) => new Date(`${date}T12:00:00`).toLocaleDateString(undefined,{month:'short',day:'numeric'});
   const tooltipDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString('en-US',{month:'long',day:'2-digit',year:'numeric'});
+  const previewMode = new URLSearchParams(window.location.search).get('preview') === '1';
   let snapshot;
   let historyRange = 7;
   let publicPresentation = {show_site_names: true, show_device_counts: true};
@@ -114,11 +115,13 @@
   }
   async function refresh() {
     try {
-      const response = await fetch(`${cfg.apiBaseUrl.replace(/\/$/,'')}${cfg.apiPath}`, {headers:{Accept:'application/json'}});
-      if (!response.ok) throw new Error(`Status API returned ${response.status}`);
+      const response = await fetch(previewMode ? '/preview-data.json' : `${cfg.apiBaseUrl.replace(/\/$/,'')}${cfg.apiPath}`, {headers:{Accept:'application/json'}, cache:'no-store'});
+      if (!response.ok) throw new Error(`${previewMode ? 'Preview data' : 'Status API'} returned ${response.status}`);
       snapshot = (await response.json()).data;
       const presentation = snapshot.configuration || {};
       publicPresentation = presentation;
+      $('preview-banner').hidden = !previewMode;
+      if (previewMode) document.title = 'Status Preview';
       applyColors(presentation);
       const logo = $('status-logo'); logo.onerror = () => { logo.onerror = null; logo.src = '/logo.svg'; }; if (presentation.logo_url) logo.src = presentation.logo_url;
       const favicon = $('status-favicon'); favicon.onerror = () => { favicon.onerror = null; favicon.href = '/favicon.svg'; }; if (presentation.favicon_url) favicon.href = presentation.favicon_url;
