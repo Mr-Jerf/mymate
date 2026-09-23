@@ -1,0 +1,24 @@
+# Optional public status page profile.
+# Usage:
+#   STATUS_API_TOKEN=$(openssl rand -hex 32) \
+#   docker compose -f docker-compose.yml -f docker-compose.status-page.yml \
+#     --profile status-page up -d --build
+services:
+  status-page:
+    profiles: [status-page]
+    build:
+      context: ./status-page
+    image: mymate-status-page:local
+    depends_on:
+      - app
+    restart: unless-stopped
+    environment:
+      STATUS_BRAND_NAME: ${STATUS_BRAND_NAME:-Network Status}
+      STATUS_SUBTITLE: ${STATUS_SUBTITLE:-Live service health}
+      STATUS_POLL_MS: ${STATUS_POLL_MS:-30000}
+      STATUS_PUBLIC_ORIGIN: ${STATUS_PUBLIC_ORIGIN:-https://status.example.com}
+      MYMATE_API_URL: http://app
+      MYMATE_STATUS_TOKEN: ${STATUS_API_TOKEN:?Set STATUS_API_TOKEN for the status-page profile}
+    ports:
+      - "${STATUS_PAGE_HTTP_PORT:-8788}:80"
+      - "${STATUS_PAGE_REDIRECT_PORT:-8789}:8080"

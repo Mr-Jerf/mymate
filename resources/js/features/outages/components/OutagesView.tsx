@@ -4,7 +4,7 @@ import { useOutages } from '../api/getOutages';
 import { StatusDot } from '../../../components/StatusDot';
 import { relativeTime } from '../../../lib/relativeTime';
 import { selectDevice, setView } from '../../../lib/shellStore';
-import { useIncidentUpdates, useAddIncidentUpdate, useUpdateIncident } from '../api/statusIncidents';
+import { useIncidentUpdates, useAddIncidentUpdate, useUpdateIncident, useAcknowledgeIncident } from '../api/statusIncidents';
 import { useIsAdmin } from '../../auth/api/auth';
 
 type Filter = 'all' | 'open' | 'closed';
@@ -29,6 +29,7 @@ function OutageUpdates({ incidentId, incidentStatus, severity }: { incidentId: n
     const { data: updates, isLoading } = useIncidentUpdates(incidentId);
     const add = useAddIncidentUpdate(incidentId);
     const updateIncident = useUpdateIncident(incidentId);
+    const acknowledge = useAcknowledgeIncident(incidentId);
 
     return (
         <div className="space-y-3 bg-white/[0.02] px-4 py-3">
@@ -48,6 +49,7 @@ function OutageUpdates({ incidentId, incidentStatus, severity }: { incidentId: n
                 <select value={incidentStatus ?? 'investigating'} onChange={(event) => updateIncident.mutate({ status: event.target.value as 'investigating' | 'monitoring' | 'resolved' })} disabled={updateIncident.isPending} className="rounded-md bg-white/[0.05] px-2 py-1 text-xs text-white ring-1 ring-white/10 outline-none [color-scheme:dark]">
                     <option value="investigating">Investigating</option><option value="monitoring">Monitoring</option><option value="resolved">Resolved</option>
                 </select>
+                <button type="button" onClick={() => acknowledge.mutate()} disabled={acknowledge.isPending || acknowledge.isSuccess} className="rounded-md bg-sky-500/15 px-2 py-1 text-[10px] font-medium text-sky-200 ring-1 ring-sky-400/25 disabled:opacity-50">{acknowledge.isSuccess ? 'Acknowledged' : acknowledge.isPending ? 'Acknowledging...' : 'Acknowledge'}</button>
             </div>}
             {isAdmin && <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); if (message.trim()) add.mutate(message.trim(), { onSuccess: () => setMessage('') }); }}>
                 <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Post an outage update for the status page..." className="min-w-0 flex-1 rounded-lg bg-white/[0.04] px-3 py-2 text-xs text-white ring-1 ring-white/10 outline-none placeholder:text-white/30" maxLength={4000} />
