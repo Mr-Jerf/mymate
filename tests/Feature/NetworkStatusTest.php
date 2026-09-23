@@ -35,6 +35,21 @@ class NetworkStatusTest extends TestCase
         ]);
     }
 
+    public function test_non_admin_cannot_acknowledge_a_status_incident(): void
+    {
+        $this->actingAs(User::factory()->create(['is_admin' => false]));
+        $incident = StatusIncident::create([
+            'state_code' => 'UT',
+            'severity' => 'outage',
+            'status' => 'investigating',
+            'summary' => 'Provider interruption',
+            'started_at' => now()->subMinutes(15),
+        ]);
+
+        $this->postJson("/api/status-incidents/{$incident->id}/acknowledge")
+            ->assertForbidden();
+    }
+
     public function test_admin_can_assign_a_site_to_a_state(): void
     {
         $this->actingAsUser();
