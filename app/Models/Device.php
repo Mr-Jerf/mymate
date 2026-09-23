@@ -143,6 +143,11 @@ class Device extends Model
         return $this->hasMany(NetworkInterface::class);
     }
 
+    public function outages(): HasMany
+    {
+        return $this->hasMany(Outage::class);
+    }
+
     /** Service probes (HTTP/TCP) attached to this device (GitHub #19). */
     public function probes(): HasMany
     {

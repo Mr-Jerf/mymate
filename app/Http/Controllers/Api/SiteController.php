@@ -9,6 +9,8 @@ use App\Http\Resources\SiteResource;
 use App\Models\Site;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Sites: the physical locations gear lives at. Read is open to any operator; writes are
@@ -49,14 +51,24 @@ class SiteController extends Controller
         return new SiteResource($site->loadCount('devices'));
     }
 
-    /**
-     * Deleting a site nulls its devices' site_id (FK nullOnDelete) rather than removing them -
-     * losing a tower record must never take the gear monitoring with it.
-     */
-    public function destroy(Site $site): Response
+    public function destroy(Site $site): Response|JsonResponse
     {
-        $site->delete();
+        return DB::transaction(function () use ($site): Response|JsonResponse {
+            $lockedSite = Site::query()->whereKey($site->getKey())->lockForUpdate()->firstOrFail();
+            $siteId = $lockedSite->getKey();
+            $hasDevices = DB::table('devices')->where('site_id', $siteId)->exists();
+            $hasLinks = DB::table('site_links')->where('site_a_id', $siteId)->orWhere('site_b_id', $siteId)->exists();
+            $hasSubscriptions = DB::table('status_subscriptions')->where('site_id', $siteId)->exists();
 
-        return response()->noContent();
+            if ($hasDevices || $hasLinks || $hasSubscriptions) {
+                return response()->json([
+                    'message' => 'This site cannot be deleted while it has assigned devices, topology links, or subscriptions.',
+                ], 409);
+            }
+
+            $lockedSite->delete();
+
+            return response()->noContent();
+        });
     }
 }

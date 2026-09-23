@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { X, PencilSimple } from '@phosphor-icons/react';
 import { useUpdateDevice } from '../api/updateDevice';
@@ -6,6 +7,7 @@ import { Toggle } from '../../../components/Toggle';
 import { useCredentials } from '../../settings/api/credentials';
 import { useDevices } from '../api/getDevices';
 import { useGeocode, useMapConfig } from '../../geo/api/geo';
+import { apiClient } from '../../../lib/apiClient';
 import { pushToast } from '../../../lib/toast';
 import type { Device, DeviceType, PollMethod } from '../../../types';
 
@@ -30,8 +32,14 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
     const update = useUpdateDevice();
     const { data: credentials } = useCredentials();
     const { data: devices } = useDevices();
+    const { data: sites } = useQuery({
+        queryKey: ['sites'],
+        queryFn: async (): Promise<Array<{ id: number; name: string; state_code: string | null }>> =>
+            (await apiClient.get<{ data: Array<{ id: number; name: string; state_code: string | null }> }>('/sites')).data.data,
+    });
 
     const [name, setName] = useState(device.name);
+    const [siteId, setSiteId] = useState<string>(device.site_id != null ? String(device.site_id) : '');
     const [mgmtIp, setMgmtIp] = useState(device.mgmt_ip);
     const [pollMethod, setPollMethod] = useState<PollMethod>(device.poll_method);
     const [deviceType, setDeviceType] = useState<DeviceType>(device.device_type);
@@ -70,6 +78,7 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
                 mgmt_ip: mgmtIp.trim(),
                 poll_method: pollMethod,
                 device_type: deviceType,
+                site_id: siteId === '' ? null : Number(siteId),
                 monitored,
                 credential_id: needsCredential && credentialId !== '' ? Number(credentialId) : null,
                 ssh_credential_id: sshCredentialId === '' ? null : Number(sshCredentialId),
@@ -141,6 +150,18 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
                             </label>
                         )}
 
+                        <label className="space-y-1 block">
+                            <span className={label}>Network site / state</span>
+                            <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className={field}>
+                                <option value="">Unassigned (excluded from state rollups)</option>
+                                {(sites ?? []).map((site) => (
+                                    <option key={site.id} value={site.id}>
+                                        {site.name}{site.state_code ? ` · ${site.state_code}` : ' · no state assigned'}
+                                    </option>
+                                ))}
+                            </select>
+                            <span className="block px-1 text-[11px] text-white/35">The device inherits its public status state from this site.</span>
+                        </label>
                         <label className="space-y-1 block">
                             <span className={label}>Type</span>
                             <select value={deviceType} onChange={(e) => setDeviceType(e.target.value as DeviceType)} className={field}>

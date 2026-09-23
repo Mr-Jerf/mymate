@@ -1,0 +1,7 @@
+window.STATUS_CONFIG = {
+  brandName: '${STATUS_BRAND_NAME}',
+  subtitle: '${STATUS_SUBTITLE}',
+  apiBaseUrl: '',
+  apiPath: '/api/status',
+  pollMs: ${STATUS_POLL_MS}
+};

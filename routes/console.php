@@ -1,5 +1,6 @@
 <?php
 
+use App\Actions\Outages\ResolveMonitoringIncidents;
 use App\Enums\AgentStatus;
 use App\Jobs\ManageHistoryPartitionsJob;
 use App\Models\Agent;
@@ -26,6 +27,8 @@ Schedule::command('mymate:backup:run --scheduled')->hourly()->name('device-backu
 
 // Sweep cached RouterOS upgrade packages past the retention window (default 90 days).
 Schedule::command('mymate:routeros:prune-packages')->daily()->name('routeros-package-prune')->withoutOverlapping();
+
+Schedule::call(fn () => app(ResolveMonitoringIncidents::class)())->everyMinute()->name('status-monitoring-resolve')->withoutOverlapping();
 
 // Reap silent agents. A connected agent heartbeats via the hub keepalive every ~30s; if an
 // "online" one hasn't been heard from in 90s its socket is dead (e.g. a blackholed link that

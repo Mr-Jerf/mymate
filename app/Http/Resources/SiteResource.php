@@ -16,6 +16,7 @@ class SiteResource extends JsonResource
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,
             'address' => $this->address,
+            'state_code' => $this->state_code,
             'external_ref' => $this->external_ref,
             'note' => $this->note,
             // Present only when the caller asked for counts (the index does) - the map uses it

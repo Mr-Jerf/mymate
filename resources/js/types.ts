@@ -472,7 +472,9 @@ export type DeviceMetricKey = 'cpu' | 'mem' | 'temp' | 'latency' | 'loss';
 
 /** Alert policy targeting - which devices a policy covers. */
 export interface AlertScope {
-    type: 'all' | 'device_type' | 'map' | 'devices';
+    type: 'all' | 'site' | 'sites' | 'device_type' | 'map' | 'devices';
+    site_id?: number;
+    site_ids?: number[];
     device_type?: DeviceType;
     map_id?: number;
     device_ids?: number[];
@@ -515,6 +517,7 @@ export interface DeviceSensorReading {
 export interface MaintenanceWindow {
     id: number;
     name: string;
+    description: string | null;
     starts_at: string | null;
     ends_at: string | null;
     scope: AlertScope;
@@ -566,6 +569,9 @@ export interface Outage {
     duration_s: number | null;
     ongoing: boolean;
     cause: string | null;
+    incident_id: number | null;
+    incident_severity: 'outage' | 'degraded' | null;
+    incident_status: 'investigating' | 'monitoring' | 'resolved' | null;
 }
 
 // Live throughput event (App\Events\InterfaceUtilUpdated) - coalesced across devices.

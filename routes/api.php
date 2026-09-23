@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\ApiTokenController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BackupSettingController;
 use App\Http\Controllers\Api\ContactController;
+use App\Http\Controllers\Api\CommandRunController;
+use App\Http\Controllers\Api\CommandTemplateController;
 use App\Http\Controllers\Api\CredentialController;
 use App\Http\Controllers\Api\DeviceBackupController;
 use App\Http\Controllers\Api\DeviceController;
@@ -28,7 +30,9 @@ use App\Http\Controllers\Api\MailSettingController;
 use App\Http\Controllers\Api\MaintenanceWindowController;
 use App\Http\Controllers\Api\MapController;
 use App\Http\Controllers\Api\MapShareController;
+use App\Http\Controllers\Api\NetworkStatusController;
 use App\Http\Controllers\Api\OutageController;
+use App\Http\Controllers\Api\OutageUpdateController;
 use App\Http\Controllers\Api\PasskeyController;
 use App\Http\Controllers\Api\ProbeController;
 use App\Http\Controllers\Api\PublicWallController;
@@ -39,6 +43,9 @@ use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\SiteController;
 use App\Http\Controllers\Api\SubnetController;
 use App\Http\Controllers\Api\SystemStatusController;
+use App\Http\Controllers\Api\StatusIncidentController;
+use App\Http\Controllers\Api\StatusPageSettingsController;
+use App\Http\Controllers\Api\StatusSubscriptionController;
 use App\Http\Controllers\Api\Tools\ToolsController;
 use App\Http\Controllers\Api\TraceController;
 use App\Http\Controllers\Api\UpdateCheckController;
@@ -57,7 +64,16 @@ Route::get('health', HealthController::class)->name('health');
 // rate-limited to deter abuse.
 Route::post('contact', [ContactController::class, 'store'])->middleware('throttle:5,1')->name('contact');
 
-// Public wallboard (GitHub #15): an unguessable per-map share token grants a read-only,
+// Public state-level network health; aggregate-only and protected by a deployment-specific status token.
+Route::get('public/status', NetworkStatusController::class)
+    ->middleware(['throttle:60,1', 'status-token'])->name('public.status');
+
+Route::post('public/status-subscriptions', [StatusSubscriptionController::class, 'store'])->middleware('throttle:5,1')->name('public.status-subscriptions.store');
+Route::get('public/status-subscriptions/verify/{token}', [StatusSubscriptionController::class, 'verify'])->middleware('throttle:20,1')->name('public.status-subscriptions.verify');
+Route::get('public/status-subscriptions/unsubscribe/{token}', [StatusSubscriptionController::class, 'unsubscribe'])->middleware('throttle:20,1')->name('public.status-subscriptions.unsubscribe');
+Route::get('public/status-subscriptions/manage/{token}', [StatusSubscriptionController::class, 'manage'])->middleware('throttle:20,1')->name('public.status-subscriptions.manage');
+Route::post('public/status-subscriptions/manage/{token}', [StatusSubscriptionController::class, 'updatePreferences'])->middleware('throttle:10,1')->name('public.status-subscriptions.manage.update');
+
 // no-login view of one map. Token-gated, read-only, and rate-limited. The payload is a
 // whitelist - no addresses or credentials cross this boundary (see PublicWallController).
 Route::middleware('throttle:120,1')->prefix('public/wall/{token}')
@@ -92,6 +108,9 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     Route::middleware('admin')->group(function (): void {
         Route::get('settings/security', [SecuritySettingController::class, 'show'])->name('settings.security.show');
         Route::put('settings/security', [SecuritySettingController::class, 'update'])->name('settings.security.update');
+        Route::get('settings/status-page', [StatusPageSettingsController::class, 'show'])->name('settings.status-page.show');
+        Route::put('settings/status-page', [StatusPageSettingsController::class, 'update'])->name('settings.status-page.update');
+        Route::post('settings/status-page/branding', [StatusPageSettingsController::class, 'upload'])->middleware('throttle:10,1')->name('settings.status-page.branding');
     });
 
     // Is a newer release out? Cached; ?fresh=1 forces a re-check (rate-limited).
@@ -183,6 +202,22 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
         ->name('devices.backups.config-at');
     Route::get('devices/{device}/backups/diff', [DeviceBackupController::class, 'diff'])
         ->name('devices.backups.diff');
+
+    // Admin-only SSH command runs. Each selected device receives its own queued job;
+    // results live briefly in the same ToolRun cache used by diagnostics.
+    Route::get('command-templates', [CommandTemplateController::class, 'index'])
+        ->middleware('admin')->name('command-templates.index');
+    Route::post('command-templates', [CommandTemplateController::class, 'store'])
+        ->middleware('admin')->name('command-templates.store');
+    Route::put('command-templates/{commandTemplate}', [CommandTemplateController::class, 'update'])
+        ->middleware('admin')->name('command-templates.update');
+    Route::delete('command-templates/{commandTemplate}', [CommandTemplateController::class, 'destroy'])
+        ->middleware('admin')->name('command-templates.destroy');
+    Route::post('command-runs', [CommandRunController::class, 'start'])
+        ->middleware('throttle:10,1')->name('command-runs.start');
+    Route::get('command-runs/{runId}', [CommandRunController::class, 'show'])->name('command-runs.show');
+    Route::delete('command-runs/{runId}', [CommandRunController::class, 'stop'])
+        ->middleware('throttle:20,1')->name('command-runs.stop');
 
     // Recent history: a bucketed util/bps series for one interface, or the
     // whole device's total throughput (bps summed across its interfaces).
@@ -282,8 +317,14 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     Route::patch('maps/{map}/shares/{share}', [MapShareController::class, 'update'])->name('maps.shares.update');
     Route::delete('maps/{map}/shares/{share}', [MapShareController::class, 'destroy'])->name('maps.shares.destroy');
 
+    Route::get('status-incidents', [StatusIncidentController::class, 'index'])->name('status-incidents.index');
+    Route::patch('status-incidents/{statusIncident}', [StatusIncidentController::class, 'update'])->name('status-incidents.update');
+    Route::get('status-incidents/{statusIncident}/updates', [StatusIncidentController::class, 'updates'])->name('status-incidents.updates.index');
+    Route::post('status-incidents/{statusIncident}/updates', [StatusIncidentController::class, 'storeUpdate'])->middleware('throttle:30,1')->name('status-incidents.updates.store');
     // Outage timeline - ?device_id= , ?state=open|closed.
     Route::get('outages', [OutageController::class, 'index'])->name('outages.index');
+    Route::get('outages/{outage}/updates', [OutageUpdateController::class, 'index'])->name('outages.updates.index');
+    Route::post('outages/{outage}/updates', [OutageUpdateController::class, 'store'])->middleware('throttle:30,1')->name('outages.updates.store');
 
     // MikroTik "The Dude" import (FR-Dude): upload a dude.db, then poll the run for
     // live stage/percent/ETA; cancel stops it cleanly.

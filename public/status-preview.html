@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Network Status Preview</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#121a2c; --line:#26324a; --muted:#91a0ba; --text:#f5f7fb; --green:#32d583; --amber:#f5b942; --red:#f97068; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; color:var(--text); background:radial-gradient(circle at 15% 0%,#172b45 0,transparent 38%),var(--bg); }
+    .wrap { width:min(1080px,calc(100% - 32px)); margin:0 auto; padding:54px 0 70px; }
+    .eyebrow { color:#8fa8cb; font-size:12px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; }
+    h1 { margin:10px 0 8px; font-size:clamp(30px,5vw,48px); letter-spacing:-.04em; }
+    .sub { color:var(--muted); margin:0; }
+    .banner { display:flex; align-items:center; gap:16px; margin:34px 0 28px; padding:22px 24px; border:1px solid #237b55; border-radius:18px; background:linear-gradient(110deg,rgba(50,213,131,.16),rgba(50,213,131,.04)); box-shadow:0 18px 55px rgba(0,0,0,.2); }
+    .pulse { width:14px; height:14px; flex:0 0 auto; border-radius:50%; background:var(--green); box-shadow:0 0 0 7px rgba(50,213,131,.13); }
+    .banner strong { display:block; font-size:19px; }
+    .banner span { color:#a6e9c7; font-size:13px; }
+    .section-head { display:flex; justify-content:space-between; align-items:end; margin:30px 0 13px; }
+    .section-head h2 { margin:0; font-size:18px; }
+    .updated { color:var(--muted); font-size:12px; }
+    .grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+    .card { position:relative; padding:18px; min-height:151px; border:1px solid var(--line); border-radius:16px; background:rgba(18,26,44,.84); transition:.2s ease; }
+    .card:hover { transform:translateY(-2px); border-color:#3b4c6b; z-index:4; }
+    .state { display:flex; align-items:center; gap:9px; font-weight:700; }
+    .dot { width:10px; height:10px; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px rgba(50,213,131,.1); }
+    .dot.amber { background:var(--amber); box-shadow:0 0 0 4px rgba(245,185,66,.1); }
+    .dot.red { background:var(--red); box-shadow:0 0 0 4px rgba(249,112,104,.1); }
+    .status { margin:12px 0 18px; color:#a6e9c7; font-size:13px; }
+    .status.amber { color:#f8fafc; }
+    .status.red { color:#ffb0a9; }
+    .uptime { font-size:27px; font-weight:750; letter-spacing:-.04em; }
+    .meta { color:var(--muted); font-size:12px; }
+    .history { position:absolute; left:10px; right:10px; bottom:10px; padding:12px; border:1px solid #3b4c6b; border-radius:12px; background:#111a2d; box-shadow:0 16px 35px rgba(0,0,0,.38); opacity:0; pointer-events:auto; transform:translateY(5px); transition:.18s ease; }
+    .card:hover .history, .card:focus-within .history { opacity:1; transform:translateY(0); }
+    .history-title { display:flex; justify-content:space-between; align-items:center; margin-bottom:9px; color:#b8c4d8; font-size:11px; font-weight:700; }
+    .bars { display:grid; grid-template-columns:repeat(7,1fr); align-items:end; gap:5px; height:42px; }
+    .bar { display:block; min-height:12px; cursor:pointer; border-radius:4px 4px 2px 2px; background:var(--green); outline:none; text-decoration:none; }
+    .bar:focus-visible { box-shadow:0 0 0 2px #f8fafc, 0 0 0 4px rgba(59,130,246,.8); }
+    .bar.yellow { height:27px; background:var(--amber); }
+    .bar.red { height:42px; background:var(--red); }
+    .bar.green { height:18px; }
+    .bar-labels { display:grid; grid-template-columns:repeat(7,1fr); gap:5px; margin-top:5px; color:#65738b; font-size:9px; text-align:center; }
+    .legend { display:flex; flex-direction:column; align-items:flex-start; gap:3px; color:#7f8da5; font-size:9px; line-height:1.1; }
+    .legend i { display:inline-block; width:7px; height:7px; margin-right:3px; border-radius:2px; background:var(--green); }
+    .legend i.yellow { background:var(--amber); }
+    .legend i.red { background:var(--red); }
+    .feed { margin-top:26px; padding:16px 18px; border:1px solid #713c3c; border-radius:16px; background:rgba(239,68,68,.07); }
+    .feed.degraded { border-color:#785c25; background:rgba(245,158,11,.08); }
+    .feed h2 { margin:0 0 12px; color:#f8fafc; font-size:14px; }
+    .feed.degraded h2 { color:#f8fafc; }
+    .feed-state { padding:10px 0; border-top:1px solid rgba(248,113,113,.15); }
+    .feed-state:first-of-type { border-top:0; padding-top:0; }
+    .feed-state strong { color:#f8fafc; font-size:13px; }
+    .feed.degraded .feed-state strong { color:#f8fafc; }
+    .feed-state time { margin-left:8px; color:#e2e8f0; font-size:11px; }
+    .feed-state p { margin:6px 0 0; color:#f1f5f9; font-size:12px; }
+    .incident { position:relative; margin-top:26px; padding:16px 42px 16px 18px; border:1px solid #68468d; border-radius:16px; background:rgba(168,85,247,.08); }
+    .incident.maintenance.active { border-color:#315b9a; background:rgba(59,130,246,.09); }
+    .incident.maintenance.completed { border-color:#26734e; background:rgba(34,197,94,.08); }
+    .incident.outage { border-color:#8f3030; background:rgba(239,68,68,.12); }
+    .incident.degraded { border-color:#956b19; background:rgba(245,158,11,.12); }
+    .incident summary { display:flex; align-items:center; flex-wrap:wrap; gap:7px; cursor:pointer; list-style:none; }
+    .incident summary::-webkit-details-marker { display:none; }
+    .incident summary::after { content:'＋'; position:absolute; right:18px; top:50%; transform:translateY(-50%); color:#f8fafc; font-size:18px; line-height:1; }
+    .incident[open] summary::after { content:'−'; }
+    .incident summary h3 { margin:0; font-size:14px; color:#f8fafc; white-space:nowrap; }
+    .incident summary .schedule { display:inline; color:#f8fafc; font-size:12px; font-weight:650; white-space:nowrap; }
+    .incident p { margin:14px 0 0; color:#f1f5f9; font-size:13px; }
+    .activity { display:none; margin-top:26px; padding:16px 18px; border:1px solid #334155; border-radius:16px; background:rgba(15,23,42,.75); }
+    .activity.visible { display:block; }
+    .activity h2 { margin:0 0 12px; color:#f8fafc; font-size:14px; }
+    .activity p { margin:7px 0; color:#e2e8f0; font-size:12px; }
+    .activity .event { margin-top:10px; padding:10px 12px; border-left:3px solid #64748b; background:rgba(255,255,255,.03); }
+    .activity a { display:inline-block; margin-top:7px; color:#f8fafc; font-size:12px; text-decoration:underline; text-underline-offset:3px; }    .foot { display:flex; justify-content:space-between; gap:16px; margin-top:36px; color:#63718b; font-size:12px; }
+    code { color:#a9c7ef; }
+
+    @media (max-width:800px) { .grid { grid-template-columns:repeat(2,1fr); } }
+    @media (max-width:480px) { .grid { grid-template-columns:1fr; } .wrap { padding-top:34px; } .foot { flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="eyebrow">Z4 Internet · Network Operations</div>
+    <h1>Network Status</h1>
+    <p class="sub">Live service health for the communities and infrastructure we monitor.</p>
+
+    <section class="banner" aria-label="Overall status">
+      <i class="pulse"></i>
+      <div><strong>All systems operational</strong><span>Last checked just now · Automatic updates every 30 seconds</span></div>
+    </section>
+
+    <div class="section-head"><h2>Service by state</h2><span class="updated">60-day availability</span></div>
+    <section class="grid">
+      <article class="card" tabindex="0"><div class="state"><i class="dot"></i> Idaho</div><div class="status">Operational</div><div class="uptime">99.99%</div><div class="meta">Network availability</div><div class="history"><div class="history-title"><span>Last 7 days</span><span class="legend"><span><i></i>Up</span><span><i class="yellow"></i>Degraded</span><span><i class="red"></i>Outage</span></span></div><div class="bars"><i class="bar green" title="Today: Up"></i><i class="bar green" title="Yesterday: Up"></i><i class="bar green" title="2 days ago: Up"></i><i class="bar green" title="3 days ago: Up"></i><i class="bar green" title="4 days ago: Up"></i><i class="bar green" title="5 days ago: Up"></i><i class="bar green" title="6 days ago: Up"></i></div><div class="bar-labels"><span>Today</span><span>1d</span><span>2d</span><span>3d</span><span>4d</span><span>5d</span><span>6d</span></div></div></article>
+      <article class="card" tabindex="0"><div class="state"><i class="dot amber"></i> Kansas</div><div class="status amber">Degraded</div><div class="uptime">99.94%</div><div class="meta">1 monitored system affected</div><div class="history"><div class="history-title"><span>Last 7 days</span><span class="legend"><span><i></i>Up</span><span><i class="yellow"></i>Degraded</span><span><i class="red"></i>Outage</span></span></div><div class="bars"><i class="bar yellow" title="Today: Degraded"></i><i class="bar green" title="Yesterday: Up"></i><i class="bar green" title="2 days ago: Up"></i><i class="bar green" title="3 days ago: Up"></i><i class="bar yellow" title="4 days ago: Degraded"></i><i class="bar green" title="5 days ago: Up"></i><i class="bar green" title="6 days ago: Up"></i></div><div class="bar-labels"><span>Today</span><span>1d</span><span>2d</span><span>3d</span><span>4d</span><span>5d</span><span>6d</span></div></div></article>
+      <article class="card" tabindex="0"><div class="state"><i class="dot"></i> Missouri</div><div class="status">Operational</div><div class="uptime">100.0%</div><div class="meta">Network availability</div><div class="history"><div class="history-title"><span>Last 7 days</span><span class="legend"><span><i></i>Up</span><span><i class="yellow"></i>Degraded</span><span><i class="red"></i>Outage</span></span></div><div class="bars"><i class="bar green" title="Today: Up"></i><i class="bar green" title="Yesterday: Up"></i><i class="bar green" title="2 days ago: Up"></i><i class="bar green" title="3 days ago: Up"></i><i class="bar green" title="4 days ago: Up"></i><i class="bar green" title="5 days ago: Up"></i><i class="bar green" title="6 days ago: Up"></i></div><div class="bar-labels"><span>Today</span><span>1d</span><span>2d</span><span>3d</span><span>4d</span><span>5d</span><span>6d</span></div></div></article>
+      <article class="card" tabindex="0"><div class="state"><i class="dot"></i> Montana</div><div class="status">Outage</div><div class="uptime">99.98%</div><div class="meta">Active outage · updates below</div><div class="history"><div class="history-title"><span>Last 7 days</span><span class="legend"><span><i></i>Up</span><span><i class="yellow"></i>Degraded</span><span><i class="red"></i>Outage</span></span></div><div class="bars"><a class="bar red" title="Today: Outage" href="#incident-montana" aria-label="Today: Montana outage"></a><i class="bar green" title="Yesterday: Up"></i><i class="bar green" title="2 days ago: Up"></i><i class="bar green" title="3 days ago: Up"></i><i class="bar green" title="4 days ago: Up"></i><i class="bar red" title="5 days ago: Outage"></i><i class="bar green" title="6 days ago: Up"></i></div><div class="bar-labels"><span>Today</span><span>1d</span><span>2d</span><span>3d</span><span>4d</span><span>5d</span><span>6d</span></div></div></article>
+      <article class="card" tabindex="0"><div class="state"><i class="dot"></i> Utah</div><div class="status">Operational</div><div class="uptime">99.97%</div><div class="meta">Network availability</div><div class="history"><div class="history-title"><span>Last 7 days</span><span class="legend"><span><i></i>Up</span><span><i class="yellow"></i>Degraded</span><span><i class="red"></i>Outage</span></span></div><div class="bars"><i class="bar green" title="Today: Up"></i><i class="bar green" title="Yesterday: Up"></i><i class="bar green" title="2 days ago: Up"></i><i class="bar green" title="3 days ago: Up"></i><i class="bar green" title="4 days ago: Up"></i><i class="bar green" title="5 days ago: Up"></i><i class="bar yellow" title="6 days ago: Degraded"></i></div><div class="bar-labels"><span>Today</span><span>1d</span><span>2d</span><span>3d</span><span>4d</span><span>5d</span><span>6d</span></div></div></article>
+    </section>
+
+    <section id="activity-panel" class="activity" aria-live="polite"><h2 id="activity-title">Select a day to view activity</h2><div id="activity-body"><p>Click one of the seven daily bars above.</p></div></section>
+
+    <details id="incident-montana" class="incident outage active"><summary><h3>Montana · Service outage</h3><span class="schedule">· Started 18 minutes ago</span></summary><p>We are investigating a service interruption affecting customers in Montana. Our network team is working to identify the cause.</p><p>Next update will be posted as soon as we have confirmed our recovery steps.</p></details>
+
+    <details class="incident maintenance scheduled"><summary><h3>Scheduled maintenance · Kansas</h3><span class="schedule">· Sep 16, 2026 · 5:48–7:48 PM MDT</span></summary><p>We are upgrading a core router as part of our routine software upgrades to core network components. Customers may experience brief periods of downtime during this timeframe.</p></details>
+
+    <div class="foot"><span>Network Operations</span><span>Last 7 days shown on hover · 60-day availability displayed on each state</span></div>
+  </main>
+  <script>
+    (() => {
+      const panel = document.getElementById('activity-panel');
+      const title = document.getElementById('activity-title');
+      const body = document.getElementById('activity-body');
+      const labels = ['Today', 'Yesterday', '2 days ago', '3 days ago', '4 days ago', '5 days ago', '6 days ago'];
+      document.querySelectorAll('.bar').forEach((bar, index) => {
+        const day = index % 7;
+        bar.setAttribute('role', 'button');
+        bar.setAttribute('tabindex', '0');
+        const open = () => {
+          panel.classList.add('visible');
+          title.textContent = `Activity · ${labels[day]}`;
+          if (day === 0) {
+            body.innerHTML = '<div class="event"><strong>Montana · Service outage</strong><p>Investigating an upstream service interruption. Recovery steps were posted as the investigation progressed.</p><a href="#incident-montana" data-open-incident="incident-montana">Open outage details and updates</a></div><div class="event"><strong>Kansas · Scheduled maintenance</strong><p>Core router upgrade. Maintenance details and timing are available in the expandable notice below.</p></div>';
+          } else {
+            body.innerHTML = '<p>No incidents or maintenance were recorded for this day.</p>';
+          }
+          body.querySelectorAll('[data-open-incident]').forEach((link) => link.addEventListener('click', () => {
+            const target = document.getElementById(link.getAttribute('data-open-incident'));
+            if (target) { target.open = true; setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0); }
+          }));
+          panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        };
+        bar.addEventListener('click', open);
+        bar.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+      });
+    })();
+  </script>
+</body>
+</html>

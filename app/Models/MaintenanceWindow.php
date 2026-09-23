@@ -16,7 +16,7 @@ class MaintenanceWindow extends Model
     /** @use HasFactory<MaintenanceWindowFactory> */
     use HasFactory;
 
-    protected $fillable = ['name', 'starts_at', 'ends_at', 'scope', 'enabled', 'created_by'];
+    protected $fillable = ['name', 'description', 'starts_at', 'ends_at', 'scope', 'enabled', 'created_by'];
 
     protected $casts = [
         'starts_at' => 'datetime',

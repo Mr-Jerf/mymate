@@ -60,15 +60,26 @@ class SiteApiTest extends TestCase
             ->assertJsonValidationErrors(['external_ref']);
     }
 
-    public function test_deleting_a_site_detaches_its_devices_rather_than_removing_them(): void
+    public function test_cannot_delete_a_site_with_assigned_devices(): void
     {
         $site = Site::factory()->create();
         $device = Device::factory()->create(['site_id' => $site->id, 'site_source' => 'import']);
 
+        $this->deleteJson("/api/sites/{$site->id}")
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'This site cannot be deleted while it has assigned devices, topology links, or subscriptions.');
+
+        $this->assertDatabaseHas('sites', ['id' => $site->id]);
+        $this->assertDatabaseHas('devices', ['id' => $device->id, 'site_id' => $site->id]);
+    }
+
+    public function test_admin_can_delete_an_empty_site(): void
+    {
+        $site = Site::factory()->create();
+
         $this->deleteJson("/api/sites/{$site->id}")->assertNoContent();
 
         $this->assertDatabaseMissing('sites', ['id' => $site->id]);
-        $this->assertDatabaseHas('devices', ['id' => $device->id, 'site_id' => null]);
     }
 
     public function test_non_admin_cannot_create_a_site(): void

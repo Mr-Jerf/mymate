@@ -14,6 +14,8 @@ class MaintenanceWindowResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
+            'overview' => $this->name,
+            'description' => $this->description,
             'starts_at' => $this->starts_at?->toIso8601String(),
             'ends_at' => $this->ends_at?->toIso8601String(),
             'scope' => $this->scope ?? ['type' => 'all'],

@@ -83,6 +83,27 @@ a Cloudflare Tunnel, uncomment the HTTP port in `docker-compose.yml` and expose 
 (the app reads `X-Forwarded-Proto`). Set your own `APP_KEY` and `REVERB_APP_SECRET`, and point
 `APP_URL` at the address you actually browse to, before you rely on it.
 
+### Optional public status page
+
+The repository includes a reusable, aggregate-only public status page in [`status-page/`](status-page/).
+It keeps the MyMate status credential in the status container and exposes only explicitly configured
+public sites, aggregate health, incident summaries, maintenance windows, and bounded history. It does
+not expose device names, management addresses, customer data, topology, credentials, or raw monitoring
+errors.
+
+Start with the complete [status-page setup guide](status-page/README.md). In brief:
+
+1. Set a dedicated `STATUS_API_TOKEN` in MyMate's protected environment.
+2. Configure public sites, state assignments, visibility, maintenance, and branding under
+   **Settings → Network status**.
+3. Copy [`status-page/status.env.example`](status-page/status.env.example) to `status.env`,
+   set the matching `MYMATE_STATUS_TOKEN`, and keep the file mode `600`.
+4. Run `docker compose --env-file status.env up -d --build` from `status-page/`.
+5. Put HTTPS/reverse-proxy or tunnel access in front of the loopback-bound status container.
+
+The browser calls only the status page's same-origin `/api/status` proxy; the private MyMate token
+is never placed in browser JavaScript or public configuration.
+
 ## Upgrading
 
 Your data, `.env` and configuration are preserved across upgrades. Every method runs the
@@ -160,6 +181,7 @@ ranges to it in the console.
 | [deploy/ssl/README.md](deploy/ssl/README.md) | HTTPS: Cloudflare Tunnel, reverse proxy, Let's Encrypt, own cert |
 | [deploy/rusted/README.md](deploy/rusted/README.md) | Config backups: the Rusted engine, how it's provisioned, and credentials |
 | [agent/README.md](agent/README.md) | The remote agent: deploy, configure, discover |
+| [NETWORK_STATUS.md](NETWORK_STATUS.md) | Public aggregate status API, privacy boundary, incident/maintenance contract, and subscription behavior |
 | [deploy/demo/README.md](deploy/demo/README.md) | The public sales demo: synthetic topology, simulator, deploy/troubleshooting |
 
 ## Contributing

@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureAdmin;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\VerifyStatusApiToken;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -36,7 +37,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(SecurityHeaders::class);
 
         // `admin` gates the operator-management write routes.
-        $middleware->alias(['admin' => EnsureAdmin::class]);
+        $middleware->alias(['admin' => EnsureAdmin::class, 'status-token' => VerifyStatusApiToken::class]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // JSON errors for the API and for any JSON request (e.g. the SPA's web-group

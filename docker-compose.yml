@@ -34,6 +34,9 @@ services:
       REVERB_APP_SECRET: change-me
       SANCTUM_STATEFUL_DOMAINS: localhost:9443,localhost,127.0.0.1
       CORS_ALLOWED_ORIGINS: https://localhost:9443
+      # Optional dedicated token for the aggregate public status API. Set this when
+      # running the reusable status-page container; leave blank when it is unused.
+      STATUS_API_TOKEN: ${STATUS_API_TOKEN:-}
     ports:
       # HTTPS on 9443 by default (self-signed cert). Change the host port with MYMATE_HTTPS_PORT.
       - "${MYMATE_HTTPS_PORT:-9443}:443"

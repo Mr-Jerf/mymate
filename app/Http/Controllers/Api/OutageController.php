@@ -16,7 +16,7 @@ class OutageController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        $query = Outage::query()->with('device')->latest('started_at');
+        $query = Outage::query()->with(['device', 'incident'])->latest('started_at');
 
         $deviceId = $request->integer('device_id');
         if ($deviceId > 0) {

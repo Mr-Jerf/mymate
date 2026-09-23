@@ -1,0 +1,10 @@
+services:
+  status-page:
+    build: .
+    image: z4-status-page:local
+    restart: unless-stopped
+    env_file:
+      - ${STATUS_ENV_FILE:-./status.env}
+    ports:
+      - "127.0.0.1:8788:80"
+      - "127.0.0.1:8789:8080"

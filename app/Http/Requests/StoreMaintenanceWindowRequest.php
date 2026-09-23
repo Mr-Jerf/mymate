@@ -20,12 +20,16 @@ class StoreMaintenanceWindowRequest extends FormRequest
 
         return [
             'name' => [$creating ? 'required' : 'sometimes', 'string', 'max:255'],
+            'description' => ['sometimes', 'nullable', 'string', 'max:10000'],
             'starts_at' => [$creating ? 'required' : 'sometimes', 'date'],
             'ends_at' => [$creating ? 'required' : 'sometimes', 'date', 'after:starts_at'],
             'enabled' => ['sometimes', 'boolean'],
             // Targeting - same bag as alert policies. null/all = fleet-wide.
             'scope' => ['nullable', 'array'],
-            'scope.type' => ['nullable', Rule::in(['all', 'device_type', 'map', 'devices'])],
+            'scope.type' => ['nullable', Rule::in(['all', 'site', 'sites', 'device_type', 'map', 'devices'])],
+            'scope.site_id' => ['nullable', 'required_if:scope.type,site', 'integer', 'exists:sites,id'],
+            'scope.site_ids' => ['nullable', 'required_if:scope.type,sites', 'array', 'min:1'],
+            'scope.site_ids.*' => ['integer', 'exists:sites,id'],
             'scope.device_type' => ['nullable', 'required_if:scope.type,device_type', Rule::enum(DeviceType::class)],
             'scope.map_id' => ['nullable', 'required_if:scope.type,map', 'integer', 'exists:maps,id'],
             'scope.device_ids' => ['nullable', 'required_if:scope.type,devices', 'array'],

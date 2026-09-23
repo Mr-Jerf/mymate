@@ -52,7 +52,7 @@ class MailSettings
             'encryption' => $c['encryption'] ?? 'tls',
             'username' => $c['username'] ?? '',
             'from_address' => $c['from_address'] ?? '',
-            'from_name' => $c['from_name'] ?? 'My Mate',
+            'from_name' => $c['from_name'] ?? 'Network Status',
             'password_set' => ! empty($c['password']),
             'configured' => $this->configured(),
         ];
@@ -84,7 +84,7 @@ class MailSettings
                 'username' => (string) ($input['username'] ?? ''),
                 'password' => $password,
                 'from_address' => (string) $input['from_address'],
-                'from_name' => (string) ($input['from_name'] ?? 'My Mate'),
+                'from_name' => (string) ($input['from_name'] ?? 'Network Status'),
             ],
         ]);
     }
@@ -132,7 +132,7 @@ class MailSettings
         ]);
         config()->set('mail.from', [
             'address' => $c['from_address'] ?? config('mail.from.address'),
-            'name' => $c['from_name'] ?? 'My Mate',
+            'name' => $c['from_name'] ?? 'Network Status',
         ]);
         config()->set('mail.default', 'smtp');
         Mail::purge('smtp'); // drop any mailer resolved against the old config
@@ -145,8 +145,8 @@ class MailSettings
     {
         $mailer = $this->apply();
         Mail::mailer($mailer)->raw(
-            'This is a test email from My Mate. If you received it, your outgoing mail server is configured correctly.',
-            fn ($m) => $m->to($to)->subject('My Mate - test email'),
+            'This is a test email from Network Status. If you received it, your outgoing mail server is configured correctly.',
+            fn ($m) => $m->to($to)->subject('Network Status - test email'),
         );
     }
 }
