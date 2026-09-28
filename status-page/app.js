@@ -106,7 +106,7 @@
     Object.keys(groups).forEach((key) => { groups[key] = newestEventsFirst(groups[key]); });
     const keys = Object.keys(groups).sort().reverse();
     $('history-archive').hidden = keys.length === 0;
-    $('history-months').innerHTML = keys.map((key, index) => `<details class="history-month" ${index === 0 ? 'open' : ''}><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : maintenanceHistoryHtml(event)).join('')}</div></details>`).join('');
+    $('history-months').innerHTML = keys.map((key) => `<details class="history-month"><summary>${esc(monthLabel(`${key}-01`))}<span>${groups[key].length} event${groups[key].length === 1 ? '' : 's'}</span></summary><div class="history-events">${groups[key].map((event) => event.event_type === 'incident' ? historyIncidentHtml(event) : maintenanceHistoryHtml(event)).join('')}</div></details>`).join('');
   }
   function setHistoryRange(range) {
     historyRange = [7, 30, 60].includes(Number(range)) ? Number(range) : 7;
