@@ -5,8 +5,11 @@ namespace App\Http\Requests\Device;
 use App\Enums\DeviceType;
 use App\Enums\PollMethod;
 use App\Rules\ManageableIp;
+use App\Rules\NotADeviceDescendant;
+use App\Support\DeviceIpScope;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class UpdateDeviceRequest extends FormRequest
 {
@@ -19,7 +22,10 @@ class UpdateDeviceRequest extends FormRequest
     {
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
-            'mgmt_ip' => ['sometimes', 'required', 'string', 'max:45', 'ip', Rule::unique('devices', 'mgmt_ip')->ignore($this->route('device')?->id), new ManageableIp],
+            // Unique per poll scope (agent or central), checked in after() - see DeviceIpScope.
+            'mgmt_ip' => ['sometimes', 'nullable', 'string', 'max:45', 'ip', new ManageableIp],
+            // Ping FROM this local address (fping -S / the agent's bound socket). Null = global default.
+            'ping_source' => ['sometimes', 'nullable', 'string', 'max:45', 'ip'],
             'poll_method' => ['sometimes', 'required', Rule::enum(PollMethod::class)],
             // Enable/disable monitoring - false pauses throughput + metrics polling.
             'monitored' => ['sometimes', 'boolean'],
@@ -46,10 +52,42 @@ class UpdateDeviceRequest extends FormRequest
             // either order regardless.
             'latency_good_ms' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:65535'],
             'latency_bad_ms' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:65535'],
+            // The uplink this device hangs off - drives alert suppression, upgrade ordering,
+            // geo inheritance and the tree layouts. NotADeviceDescendant covers both a device
+            // parented to itself and one parented to its own downstream gear (a loop).
             'parent_device_id' => [
                 'sometimes', 'nullable', 'integer', 'exists:devices,id',
-                Rule::notIn([$this->route('device')?->id]), // a device can't be its own parent
+                new NotADeviceDescendant($this->route('device')?->id),
             ],
         ];
+    }
+
+    /**
+     * Check the device's *effective* IP + agent after this edit, so changing only the agent (moving
+     * the device onto an agent that already polls that IP) is caught too, not just an IP change.
+     *
+     * @return list<callable>
+     */
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            $device = $this->route('device');
+            if ($device === null) {
+                return;
+            }
+            $ip = $this->has('mgmt_ip') ? $this->input('mgmt_ip') : $device->mgmt_ip;
+            $agentId = $this->has('agent_id')
+                ? ($this->filled('agent_id') ? (int) $this->input('agent_id') : null)
+                : $device->agent_id;
+            // Only a ping-only device may drop its IP (becoming a static map object); SNMP and
+            // RouterOS polling have nothing to talk to without one.
+            $method = $this->has('poll_method') ? (string) $this->input('poll_method') : $device->poll_method->value;
+            if (($ip === null || $ip === '') && $method !== PollMethod::None->value && ! $validator->errors()->has('mgmt_ip')) {
+                $validator->errors()->add('mgmt_ip', 'A device polled over SNMP or RouterOS needs a management IP. Only a ping-only device can be a static object with no IP.');
+
+                return;
+            }
+            DeviceIpScope::check($validator, $ip, $agentId, $device->id);
+        }];
     }
 }

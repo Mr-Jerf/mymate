@@ -184,7 +184,8 @@ If the network you want to watch is out of band, you don't have to expose it. Ru
 [agent](agent/README.md) inside it (a single Go binary that runs on a VM, a container or a
 Raspberry Pi). It dials an outbound WebSocket back to the app and polls and discovers devices
 locally. Enrol one with `php artisan mymate:agent:create "<name>"` and assign devices or scan
-ranges to it in the console.
+ranges to it in the console. There's also a tiny agent-only container image, so a MikroTik
+running RouterOS 7 can host the agent itself, see [agent/ROUTEROS.md](agent/ROUTEROS.md).
 
 ## Documentation
 
@@ -196,6 +197,7 @@ ranges to it in the console.
 | [deploy/rusted/README.md](deploy/rusted/README.md) | Config backups: the Rusted engine, how it's provisioned, and credentials |
 | [agent/README.md](agent/README.md) | The remote agent: deploy, configure, discover |
 | [NETWORK_STATUS.md](NETWORK_STATUS.md) | Public aggregate status API, privacy boundary, incident/maintenance contract, and subscription behavior |
+| [agent/ROUTEROS.md](agent/ROUTEROS.md) | Running the agent in a MikroTik RouterOS 7 container |
 | [deploy/demo/README.md](deploy/demo/README.md) | The public sales demo: synthetic topology, simulator, deploy/troubleshooting |
 
 ## Contributing

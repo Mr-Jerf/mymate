@@ -92,6 +92,11 @@ return [
         'interval' => (int) env('MYMATE_POLL_INTERVAL', 12),
         // How often the loop re-runs interface discovery (names/capacity change rarely).
         'discover_interval' => (int) env('MYMATE_DISCOVER_INTERVAL', 600),
+        // How often SNMP devices get their port packet / error / discard counters read (s).
+        // It's ten more OIDs per port so it runs slower than the octets. The RouterOS API
+        // hands the same counters over with every tick at no extra cost, so this doesn't
+        // apply there. Remote agents follow the same cadence.
+        'port_stats_interval' => (int) env('MYMATE_PORT_STATS_INTERVAL', 60),
 
         // Scale-out: throughput work is sharded into N batch jobs by
         // crc32(device_id) % shards, each guarded by a per-shard overlap lock.
@@ -132,6 +137,9 @@ return [
     'snmp' => [
         'timeout_us' => (int) env('MYMATE_SNMP_TIMEOUT_US', 1_000_000), // 1s
         'retries' => (int) env('MYMATE_SNMP_RETRIES', 1),
+        // Most OIDs in one GET PDU for the per-port counter reads, keeps a reply comfortably
+        // under a 1500 byte packet.
+        'get_chunk' => (int) env('MYMATE_SNMP_GET_CHUNK', 40),
         // Numeric OIDs (no MIBs needed). ifXTable = 64-bit HC counters + ifHighSpeed (Mbps).
         'oids' => [
             'if_descr' => '.1.3.6.1.2.1.2.2.1.2',
@@ -140,7 +148,32 @@ return [
             'if_high_speed' => '.1.3.6.1.2.1.31.1.1.1.15',
             'if_hc_in_octets' => '.1.3.6.1.2.1.31.1.1.1.6',
             'if_hc_out_octets' => '.1.3.6.1.2.1.31.1.1.1.10',
+            // 32-bit ifTable octets, only read when the HC ones aren't there (SNMPv1 can't carry
+            // Counter64 at all, which is every airOS box). They wrap, see RateCalculator.
+            'if_in_octets' => '.1.3.6.1.2.1.2.2.1.10',
+            'if_out_octets' => '.1.3.6.1.2.1.2.2.1.16',
             'if_oper_status' => '.1.3.6.1.2.1.2.2.1.8', // ifOperStatus (1=up) - per-port up/down
+            // Port counters for errors/discards/packets, read by GET per known ifIndex on the
+            // slower port_stats_interval. Errors and discards only exist as Counter32.
+            'if_in_discards' => '.1.3.6.1.2.1.2.2.1.13',
+            'if_in_errors' => '.1.3.6.1.2.1.2.2.1.14',
+            'if_out_discards' => '.1.3.6.1.2.1.2.2.1.19',
+            'if_out_errors' => '.1.3.6.1.2.1.2.2.1.20',
+            'if_hc_in_ucast_pkts' => '.1.3.6.1.2.1.31.1.1.1.7',
+            'if_hc_in_mcast_pkts' => '.1.3.6.1.2.1.31.1.1.1.8',
+            'if_hc_in_bcast_pkts' => '.1.3.6.1.2.1.31.1.1.1.9',
+            'if_hc_out_ucast_pkts' => '.1.3.6.1.2.1.31.1.1.1.11',
+            'if_hc_out_mcast_pkts' => '.1.3.6.1.2.1.31.1.1.1.12',
+            'if_hc_out_bcast_pkts' => '.1.3.6.1.2.1.31.1.1.1.13',
+            // Packet fallback when the HC packet columns don't answer (v1, or a box without
+            // them): unicast + non-unicast from the ifTable, Counter32 so they wrap.
+            'if_in_ucast_pkts' => '.1.3.6.1.2.1.2.2.1.11',
+            'if_in_nucast_pkts' => '.1.3.6.1.2.1.2.2.1.12',
+            'if_out_ucast_pkts' => '.1.3.6.1.2.1.2.2.1.17',
+            'if_out_nucast_pkts' => '.1.3.6.1.2.1.2.2.1.18',
+            // Uptime for the metrics tick: hrSystemUptime (the host) is preferred over
+            // sysUpTime (the SNMP agent, which also resets when snmpd restarts).
+            'hr_system_uptime' => '.1.3.6.1.2.1.25.1.1.0',
 
             // system group - used by discovery to identify a responder and
             // by CaptureDeviceFacts for vendor/uptime/type.
@@ -176,6 +209,18 @@ return [
         // Address -> lat/lng geocoder, proxied server-side (fixed trusted host, like the
         // update check). Empty disables address lookup; drag-drop still works.
         'geocoder_url' => env('MYMATE_MAP_GEOCODER_URL', 'https://nominatim.openstreetmap.org/search'),
+        // Custom background image per logical map (GitHub #37): max upload size (KB) and the
+        // largest side (px) we'll accept, so a 30k-pixel scan can't stall every browser that opens it.
+        'background_max_kb' => (int) env('MYMATE_MAP_BACKGROUND_MAX_KB', 10240),
+        'background_max_px' => (int) env('MYMATE_MAP_BACKGROUND_MAX_PX', 16384),
+    ],
+
+    // Public wallboard embedding (GitHub #15). Default origins allowed to frame /wall/{token} in an
+    // iframe, space or comma separated (eg "https://intranet.example.com https://*.example.org").
+    // Empty = no embedding. Admins override this in Settings > Security (App\Support\WallEmbedSettings);
+    // App\Support\FrameAncestors documents what's accepted. Never affects any other page.
+    'wall' => [
+        'frame_ancestors' => env('MYMATE_WALL_FRAME_ANCESTORS', ''),
     ],
 
     // Update check: compare this install's version against the latest GitHub release so
@@ -233,6 +278,9 @@ return [
         //   mem_*_walk  used/free columns for the 'cisco' strategy
         //   temp_oids   GET these scalars, take the max -> temp (÷ temp_divisor)
         //   temp_walk   walk this column, take the max -> temp (÷ temp_divisor)
+        //   optical_rx_walk / optical_tx_walk   SFP optical power columns keyed by ifIndex
+        //               (divided by optical_divisor -> dBm); optional optical_name_walk gives each row's
+        //               port name, which is matched first (safer if the index isn't the ifIndex)
         'profiles' => [
             'mikrotik' => [
                 'cpu_walk' => '.1.3.6.1.2.1.25.3.3.1.2',   // hrProcessorLoad
@@ -245,8 +293,25 @@ return [
                 // Wireless (MIKROTIK-MIB): count the registration table (one row per associated
                 // station) for client count; station signal strength for a CPE. SNR/CCQ over
                 // SNMP aren't standardised on RouterOS - the RouterOS API path fills those in.
-                'clients_walk' => '.1.3.6.1.4.1.14988.1.1.1.2.1.3', // mtxrWlRtabStrength (per client)
+                //
+                // The RouterOS 7 wifi stack (wifi-qcom, 7.13+) isn't in the legacy mtxrWl tables,
+                // it has its own mtxrWifiRegistrationTable (mtxrWifi.4, in the 7.19 MIB). We walk its
+                // signal column for both the row count and the average client signal. It has no
+                // SNR or CCQ columns at all. wifiwave2 (7.12 and older) and wifi CAPsMAN remote
+                // caps aren't reliably in there (the old CAPsMAN mtxrWlCMRtab reads 0 on wifi
+                // CAPsMAN), so for those the RouterOS API poll method is the way to get RF.
+                'clients_walk' => [
+                    '.1.3.6.1.4.1.14988.1.1.1.2.1.3', // mtxrWlRtabStrength (legacy, per client)
+                    '.1.3.6.1.4.1.14988.1.1.21.4.1.6', // mtxrWifiRegistrationSignal (wifi, per client)
+                ],
                 'signal_oids' => ['.1.3.6.1.4.1.14988.1.1.1.1.1.4'], // mtxrWlStatStrength (station mode)
+                'signal_walk' => ['.1.3.6.1.4.1.14988.1.1.21.4.1.6'], // mtxrWifiRegistrationSignal, dBm
+                // SFP optical power (GitHub #11) from mtxrOpticalTable, one row per port with a
+                // module, indexed by ifIndex. Power is in thousandths of a dBm (-5123 -> -5.123).
+                'optical_rx_walk' => '.1.3.6.1.4.1.14988.1.1.19.1.1.10', // mtxrOpticalRxPower
+                'optical_tx_walk' => '.1.3.6.1.4.1.14988.1.1.19.1.1.9',  // mtxrOpticalTxPower
+                'optical_name_walk' => '.1.3.6.1.4.1.14988.1.1.19.1.1.2', // mtxrOpticalName
+                'optical_divisor' => 1000,
             ],
             // Ubiquiti airMAX (UBNT-AirMAX-MIB, enterprise 41112.1.4). RF is read from both the
             // per-station table (an AP -> averaged across its clients) and the radio's own
@@ -302,6 +367,12 @@ return [
         // host-MIB storage columns for the 'hrstorage' memory strategy - walk descr to
         // find the physical-RAM row, then used/size. Swap/virtual/cached rows are skipped.
         'hrstorage' => [
+            // hrStorageEntry: the whole row walked in one go (type, descr, units, size, used),
+            // which feeds both the memory % and the per-entry storage list. The column OIDs
+            // below are the fallback for an agent that won't walk the entry.
+            'entry' => '.1.3.6.1.2.1.25.2.3.1',
+            'type' => '.1.3.6.1.2.1.25.2.3.1.2',   // hrStorageType
+            'units' => '.1.3.6.1.2.1.25.2.3.1.4',  // hrStorageAllocationUnits (bytes)
             'descr' => '.1.3.6.1.2.1.25.2.3.1.3',  // hrStorageDescr
             'size' => '.1.3.6.1.2.1.25.2.3.1.5',   // hrStorageSize (in alloc units)
             'used' => '.1.3.6.1.2.1.25.2.3.1.6',   // hrStorageUsed
@@ -376,6 +447,25 @@ return [
         'max_points' => (int) env('MYMATE_HISTORY_MAX_POINTS', 240),
         // History API: default lookback window (s) when from/to aren't given.
         'default_window' => (int) env('MYMATE_HISTORY_DEFAULT_WINDOW', 3600),
+        // Long-term rollups (GitHub #28): 5 minute and hourly aggregates kept far longer than
+        // raw, filled by `mymate:history:rollup` (scheduled every 5 minutes). Retention per
+        // tier is editable in Settings; these are the defaults. 400 days of hourly covers a
+        // year of graphs with room to spare.
+        'rollup_5m_days' => (int) env('MYMATE_HISTORY_ROLLUP_5M_DAYS', 30),
+        'rollup_1h_days' => (int) env('MYMATE_HISTORY_ROLLUP_1H_DAYS', 400),
+        'rollup' => [
+            // A bucket only counts as closed this many seconds after it ends, so a slow poll
+            // whose rows land a bit after their ts still makes it in. Readers stitch raw on
+            // for the tail, so a bigger grace costs nothing visible.
+            'grace' => (int) env('MYMATE_HISTORY_ROLLUP_GRACE', 300),
+            // Raw seconds rolled into 5m per statement, and 5m/raw seconds into 1h. Keeps each
+            // INSERT ... SELECT short on big fleets; lower slice_5m if one hour of raw is huge.
+            'slice_5m' => (int) env('MYMATE_HISTORY_ROLLUP_SLICE_5M', 3600),
+            'slice_1h' => (int) env('MYMATE_HISTORY_ROLLUP_SLICE_1H', 86400),
+            // Seconds one scheduled run may spend before handing over to the next. A backfill
+            // after an upgrade or downtime simply continues on the following runs.
+            'budget' => (int) env('MYMATE_HISTORY_ROLLUP_BUDGET', 240),
+        ],
     ],
 
     // Device config backups. My Mate is the control plane for the

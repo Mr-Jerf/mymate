@@ -26,9 +26,23 @@ export interface Operator {
     is_admin: boolean;
     restricted?: boolean;
     map_ids?: number[];
+    group_ids?: number[]; // named groups (GitHub #28), admin view only
     passkey_exempt?: boolean; // excluded from a mandatory-passkey rule (wallboard/kiosk)
     email?: string;
     created_at?: string;
+}
+
+/**
+ * A named operator group (GitHub #28). `restricted` means members only see `map_ids` (and their
+ * sub-maps); otherwise it's read-only on everything. Admin-only.
+ */
+export interface OperatorGroup {
+    id: number;
+    name: string;
+    description: string | null;
+    restricted: boolean;
+    map_ids: number[];
+    user_ids: number[];
 }
 
 export type PollMethod = 'snmp' | 'routeros' | 'none';
@@ -38,7 +52,8 @@ export type DeviceType = 'router' | 'switch' | 'ap' | 'server' | 'internet' | 'u
 export interface Device {
     id: number;
     name: string;
-    mgmt_ip: string;
+    mgmt_ip: string | null; // null = a static map object (no IP, never polled)
+    ping_source: string | null; // local address the up/down ping is sent FROM; null = global default
     poll_method: PollMethod;
     monitored: boolean; // false = polling paused (no throughput/metrics collected)
     status: DeviceStatus;
@@ -48,6 +63,10 @@ export interface Device {
     latitude: number | null; // geo overlay position (the device's own coords)
     longitude: number | null;
     geo_source: 'manual' | 'address' | 'snmp' | null;
+    // What the device's own SNMP / RouterOS location advertises (null = no coords in it), kept
+    // even under a manual pin so it can be handed back to it (GitHub #22).
+    snmp_latitude: number | null;
+    snmp_longitude: number | null;
     // Site placement: assigning a site places the device at it without copying coordinates.
     site_id: number | null;
     site_name: string | null;
@@ -93,6 +112,8 @@ export interface Device {
     mem_used_pct: number | null;
     temp_c: number | null;
     metrics_at: string | null;
+    /** Per-processor load from the last poll. Only on the single device read (GET /devices/{id}). */
+    cpu_loads?: CpuLoad[];
     signal_dbm: number | null;
     snr_db: number | null;
     ccq_pct: number | null;
@@ -185,12 +206,24 @@ export interface NetworkInterface {
     if_index: number;
     name: string;
     description: string | null;
+    oper_status: 'up' | 'down' | null; // link state from the last poll; null = not reported yet
     speed_mbps: number | null; // physical port capacity, read-only from SNMP
     ospf_cost: number | null; // OSPF outbound metric (RouterOS API), null if not OSPF
     util_in: number | null; // per-port utilisation % (vs speed_mbps) - inspector only
     util_out: number | null;
     bps_in: number | null; // latest raw throughput (bits/sec) - the live signal link util derives from
     bps_out: number | null;
+    // SFP / fibre optical power in dBm. Null = no module, copper port, or not readable.
+    optical_rx_dbm: number | null;
+    optical_tx_dbm: number | null;
+    optical_at: string | null;
+    // Port rates per second from the last counter read, null until two reads have landed.
+    pkts_in?: number | null;
+    pkts_out?: number | null;
+    errors_in?: number | null;
+    errors_out?: number | null;
+    discards_in?: number | null;
+    discards_out?: number | null;
 }
 
 export interface Link {
@@ -350,6 +383,21 @@ export interface MapDetail {
     child_device_links: ChildDeviceLink[];
     map_links: MapLink[];
     map_notes: MapNote[];
+    // Only on the public wallboard payload (GitHub #37). The logged-in canvas reads the background
+    // from its own endpoint instead, so editing it never touches this object.
+    background?: MapBackground | null;
+}
+
+/** A map's custom background image and where it sits on the canvas, in flow coordinates (GitHub #37). */
+export interface MapBackground {
+    version: string; // changes on every upload; part of the image URL
+    mime: string;
+    width: number; // natural size, px
+    height: number;
+    x: number;
+    y: number;
+    scale: number;
+    opacity: number; // 0..1
 }
 
 // Alerting.
@@ -364,7 +412,8 @@ export type AlertConditionType =
     | 'high_metric'
     | 'probe_down'
     | 'probe_slow'
-    | 'agent_down';
+    | 'agent_down'
+    | 'optical_power';
 
 // Service probes (GitHub #19): HTTP/TCP checks attached to a device.
 export type ProbeKind = 'http' | 'tcp';
@@ -525,12 +574,35 @@ export interface MaintenanceWindow {
     active: boolean;
 }
 
+/**
+ * Which interfaces an interface-level policy watches (interface_down, per-interface
+ * low_throughput). Mirrors App\Support\InterfaceFilter. Missing = every port.
+ */
+export interface AlertInterfaceFilter {
+    mode: 'all' | 'linked' | 'match' | 'selected';
+    match?: string; // comma separated globs, eg "sfp*, vlan*"
+    interface_ids?: number[];
+}
+
+export interface AlertPolicyParams {
+    threshold?: number;
+    duration_minutes?: number;
+    suppress_dependent?: boolean;
+    metric?: DeviceMetricKey;
+    target?: 'links' | 'interfaces'; // low_throughput only
+    interfaces?: AlertInterfaceFilter;
+    // optical_power: Rx or Tx, fire below or above, the line in dBm.
+    optical?: 'rx' | 'tx';
+    bound?: 'below' | 'above';
+    dbm?: number;
+}
+
 export interface AlertPolicy {
     id: number;
     name: string;
     condition: AlertConditionType;
     condition_label: string;
-    params: { threshold?: number; duration_minutes?: number; suppress_dependent?: boolean; metric?: DeviceMetricKey };
+    params: AlertPolicyParams;
     scope: AlertScope;
     enabled: boolean;
     transport_ids: number[];
@@ -575,19 +647,48 @@ export interface Outage {
 }
 
 // Live throughput event (App\Events\InterfaceUtilUpdated) - coalesced across devices.
-export interface InterfaceUtilFrame {
+// Port-list extras on a live interface frame (App\Services\Polling\LiveInterfaceFrame). Each is only
+// there when it changed, a missing key means keep what you have.
+export interface InterfacePortExtras {
+    oper_status?: 'up' | 'down';
+    pkts_in?: number;
+    pkts_out?: number;
+    errors_in?: number;
+    errors_out?: number;
+    discards_in?: number;
+    discards_out?: number;
+    optical_rx_dbm?: number;
+    optical_tx_dbm?: number;
+}
+
+export interface InterfaceUtilFrame extends InterfacePortExtras {
     interface_id: number;
-    device_id: number;
     util_in: number | null;
     util_out: number | null;
-    speed_mbps: number | null;
+    speed_mbps?: number | null; // left off `ports` entries
     bps_in: number | null;
     bps_out: number | null;
-    status: DeviceStatus;
+    // Older servers repeated these per interface; they're on the device frame.
+    device_id?: number;
+    status?: DeviceStatus;
+}
+
+// An alert started firing or a firing one resolved (GitHub #22) - drives the map-screen popup for a
+// port going down and the live count on the Alerts nav item.
+export interface AlertStateChangedPayload {
+    id: number;
+    state: 'firing' | 'resolved';
+    condition: AlertConditionType | null;
+    message: string;
+    device_id: number | null;
+    interface_id: number | null; // set for a port-level alert (interface down, optical, per-port throughput)
 }
 
 export interface InterfaceUtilUpdatedPayload {
-    devices: { device_id: number; status: DeviceStatus; interfaces: InterfaceUtilFrame[] }[];
+    // `interfaces` are link ends (what the map draws). `ports` are the rest of a device someone has
+    // open (device page / inspector), for the port lists only; a frame can carry just those, with
+    // `interfaces` empty, when a big device is split to fit.
+    devices: { device_id: number; status: DeviceStatus; interfaces: InterfaceUtilFrame[]; ports?: InterfaceUtilFrame[] }[];
     device_count: number;
     interface_count: number;
 }
@@ -605,6 +706,11 @@ export interface InterfaceSample {
 // (the default, unchanged); the rest come from the device-metrics pipeline.
 export type TileMetric = 'throughput' | 'cpu' | 'mem' | 'temp';
 
+export interface CpuLoad {
+    index: number; // the cpu history family's key (hrDeviceIndex, or the core number over RouterOS)
+    load_pct: number;
+}
+
 // Live device-metrics event (App\Events\DeviceMetricsUpdated) - coalesced across devices.
 export interface DeviceMetricsFrame {
     device_id: number;
@@ -616,6 +722,18 @@ export interface DeviceMetricsFrame {
     ccq_pct: number | null;
     wireless_clients: number | null;
     ospf_neighbors: number | null;
+    // Device page extras (App\Services\Polling\LiveDeviceFrame), only there when the poll read them.
+    uptime_seconds?: number;
+    cpu_loads?: CpuLoad[];
+    storage?: true; // storage was read this tick, refetch the list if it's on screen
+}
+
+// A device's uptime went backwards (App\Events\DeviceRebooted).
+export interface DeviceRebootedPayload {
+    device_id: number;
+    name: string;
+    booted_at: string;
+    previous_uptime_s: number | null;
 }
 
 export interface DeviceMetricsUpdatedPayload {
@@ -676,6 +794,7 @@ export interface Subnet {
 export interface DiscoveryCandidate {
     id: number;
     ip: string;
+    agent: { id: number; name: string | null } | null; // agent whose sweep found it; null = central
     status: DiscoveryStatus;
     sysname: string | null;
     detected_method: PollMethod | null;

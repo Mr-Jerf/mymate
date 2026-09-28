@@ -7,6 +7,7 @@ use App\Http\Requests\User\StoreUserRequest;
 use App\Http\Requests\User\UpdateUserRequest;
 use App\Models\User;
 use App\Support\EngineLog;
+use App\Support\RestrictedAudience;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -45,6 +46,7 @@ class UserController extends Controller
         $this->applyAccess($user, $request);
         $user->save();
         $this->syncMaps($user, $request);
+        $this->syncGroups($user, $request);
 
         EngineLog::warning('auth: operator created', [
             'actor_id' => $request->user()->id,
@@ -52,6 +54,8 @@ class UserController extends Controller
             'is_admin' => $user->is_admin,
             'ip' => $request->ip(),
         ]);
+
+        RestrictedAudience::forget(); // access changed - refresh who gets which live devices
 
         return response()->json($this->shape($user, true), 201);
     }
@@ -82,6 +86,7 @@ class UserController extends Controller
         $this->applyAccess($user, $request);
         $user->save();
         $this->syncMaps($user, $request);
+        $this->syncGroups($user, $request);
 
         EngineLog::warning('auth: operator updated', [
             'actor_id' => $request->user()->id,
@@ -89,6 +94,8 @@ class UserController extends Controller
             'is_admin' => $user->is_admin,
             'ip' => $request->ip(),
         ]);
+
+        RestrictedAudience::forget(); // access changed - refresh who gets which live devices
 
         return response()->json($this->shape($user, true));
     }
@@ -110,6 +117,8 @@ class UserController extends Controller
             'user_id' => $user->id,
             'ip' => $request->ip(),
         ]);
+
+        RestrictedAudience::forget(); // access changed - refresh who gets which live devices
 
         return response()->noContent();
     }
@@ -149,6 +158,23 @@ class UserController extends Controller
     }
 
     /**
+     * Sync the operator's groups (GitHub #28) when the payload carries them. Admins see everything,
+     * so they're never left in a group - becoming admin drops any memberships, same as it clears
+     * the restricted flag.
+     */
+    private function syncGroups(User $user, Request $request): void
+    {
+        if ($user->is_admin) {
+            $user->groups()->detach();
+
+            return;
+        }
+        if ($request->has('group_ids')) {
+            $user->groups()->sync(array_map('intval', (array) $request->input('group_ids', [])));
+        }
+    }
+
+    /**
      * Tier-shaped payload. Passwords are never present (model `$hidden`); a non-admin also
      * never sees email or timestamps - "can view the roster, not sensitive data".
      *
@@ -170,6 +196,7 @@ class UserController extends Controller
             ...$base,
             'restricted' => (bool) $user->restricted,
             'map_ids' => $user->restricted ? $user->maps()->withoutGlobalScopes()->pluck('maps.id')->all() : [],
+            'group_ids' => $user->groups()->pluck('user_groups.id')->map(fn ($id) => (int) $id)->all(),
             'passkey_exempt' => (bool) $user->passkey_exempt,
             'email' => $user->email,
             'created_at' => $user->created_at?->toIso8601String(),

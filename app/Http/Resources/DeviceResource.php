@@ -13,6 +13,8 @@ class DeviceResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'mgmt_ip' => $this->mgmt_ip,
+            // Local address the up/down ping is sent FROM; null = the global default.
+            'ping_source' => $this->ping_source,
             'poll_method' => $this->poll_method->value,
             'monitored' => (bool) $this->monitored,
             'status' => $this->status->value,
@@ -25,6 +27,10 @@ class DeviceResource extends JsonResource
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,
             'geo_source' => $this->geo_source,
+            // What the device's own SNMP / RouterOS location advertises, kept even under a manual
+            // pin so the editor can offer to hand the device back to it (GitHub #22).
+            'snmp_latitude' => $this->snmp_latitude,
+            'snmp_longitude' => $this->snmp_longitude,
             // Site placement: a site carries coordinates once and every device at it inherits
             // them at read time, so assigning a site places a whole tower's worth of gear
             // without copying coordinates onto each row.
@@ -72,6 +78,12 @@ class DeviceResource extends JsonResource
             'mem_used_pct' => $this->mem_used_pct,
             'temp_c' => $this->temp_c,
             'metrics_at' => $this->metrics_at,
+            // Per-processor load [{index, load_pct}] for the device page. Single device reads only,
+            // a map's worth of 64 core routers would make every list payload fat for nothing.
+            'cpu_loads' => $this->when(
+                $request->routeIs('devices.show'),
+                fn () => array_values(array_filter((array) ($this->cpu_loads ?? []), 'is_array')),
+            ),
             'signal_dbm' => $this->signal_dbm,
             'snr_db' => $this->snr_db,
             'ccq_pct' => $this->ccq_pct,

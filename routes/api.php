@@ -13,22 +13,26 @@ use App\Http\Controllers\Api\CommandTemplateController;
 use App\Http\Controllers\Api\CredentialController;
 use App\Http\Controllers\Api\DeviceBackupController;
 use App\Http\Controllers\Api\DeviceController;
+use App\Http\Controllers\Api\DeviceHealthController;
+use App\Http\Controllers\Api\DeviceHistoryController;
 use App\Http\Controllers\Api\DeviceIconController;
 use App\Http\Controllers\Api\DiscoverDeviceController;
 use App\Http\Controllers\Api\DiscoveryCandidateController;
 use App\Http\Controllers\Api\FactoryResetController;
 use App\Http\Controllers\Api\GeoController;
 use App\Http\Controllers\Api\GraphController;
+use App\Http\Controllers\Api\GraphSettingController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\ImportController;
 use App\Http\Controllers\Api\InterfaceController;
 use App\Http\Controllers\Api\InterfaceSampleController;
 use App\Http\Controllers\Api\LibreNmsImportController;
 use App\Http\Controllers\Api\LinkController;
-use App\Http\Controllers\Api\GraphSettingController;
 use App\Http\Controllers\Api\MailSettingController;
 use App\Http\Controllers\Api\MaintenanceWindowController;
+use App\Http\Controllers\Api\MapBackgroundController;
 use App\Http\Controllers\Api\MapController;
+use App\Http\Controllers\Api\MapPlaybackController;
 use App\Http\Controllers\Api\MapShareController;
 use App\Http\Controllers\Api\NetworkStatusController;
 use App\Http\Controllers\Api\OutageController;
@@ -50,10 +54,13 @@ use App\Http\Controllers\Api\Tools\ToolsController;
 use App\Http\Controllers\Api\TraceController;
 use App\Http\Controllers\Api\UpdateCheckController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\UserGroupController;
+use App\Http\Controllers\Api\WallEmbedSettingController;
 use App\Http\Middleware\EnsurePasskeyVerified;
 use App\Http\Middleware\RestrictedAccess;
 use App\Http\Middleware\RestrictWritesToAdmins;
 use Illuminate\Support\Facades\Route;
+use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 
 // --- Public ---------------------------------------------------------------
 // Ops health probe (DB + Redis) - 200 healthy / 503 degraded. Stays
@@ -76,12 +83,19 @@ Route::post('public/status-subscriptions/manage/{token}', [StatusSubscriptionCon
 
 // no-login view of one map. Token-gated, read-only, and rate-limited. The payload is a
 // whitelist - no addresses or credentials cross this boundary (see PublicWallController).
-Route::middleware('throttle:120,1')->prefix('public/wall/{token}')
+// No Sanctum stateful layer here: these never need a session, and inside a third-party iframe the
+// browser won't send the (SameSite=lax) session cookie anyway, so each 5s poll would otherwise
+// mint a fresh throwaway session in Redis.
+Route::middleware('throttle:120,1')->withoutMiddleware(EnsureFrontendRequestsAreStateful::class)
+    ->prefix('public/wall/{token}')
     ->where(['token' => '[A-Za-z0-9]+'])->group(function (): void {
         Route::get('map', [PublicWallController::class, 'map'])->name('public.wall.map');
         Route::get('devices', [PublicWallController::class, 'devices'])->name('public.wall.devices');
         Route::get('devices/{device}/icon', [PublicWallController::class, 'icon'])->name('public.wall.icon');
+        Route::get('device-icons', [PublicWallController::class, 'iconByModel'])->name('public.wall.icon-by-model');
         Route::get('links', [PublicWallController::class, 'links'])->name('public.wall.links');
+        Route::get('map-config', [PublicWallController::class, 'mapConfig'])->name('public.wall.map-config');
+        Route::get('background', [PublicWallController::class, 'background'])->name('public.wall.background');
     });
 
 // Login/logout live on the web group (session + CSRF) - see routes/web.php.
@@ -111,6 +125,9 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
         Route::get('settings/status-page', [StatusPageSettingsController::class, 'show'])->name('settings.status-page.show');
         Route::put('settings/status-page', [StatusPageSettingsController::class, 'update'])->name('settings.status-page.update');
         Route::post('settings/status-page/branding', [StatusPageSettingsController::class, 'upload'])->middleware('throttle:10,1')->name('settings.status-page.branding');
+        // Origins allowed to embed the public wallboard in an iframe (GitHub #15).
+        Route::get('settings/wall-embed', [WallEmbedSettingController::class, 'show'])->name('settings.wall-embed.show');
+        Route::put('settings/wall-embed', [WallEmbedSettingController::class, 'update'])->name('settings.wall-embed.update');
     });
 
     // Is a newer release out? Cached; ?fresh=1 forces a re-check (rate-limited).
@@ -149,6 +166,15 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
         Route::delete('users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
     });
 
+    // Operator groups (GitHub #28). Admin-only end to end, reads included - membership and the
+    // map set decide what people can see, so a non-admin has no business listing them either.
+    Route::middleware(['admin', 'throttle:30,1'])->group(function (): void {
+        Route::get('user-groups', [UserGroupController::class, 'index'])->name('user-groups.index');
+        Route::post('user-groups', [UserGroupController::class, 'store'])->name('user-groups.store');
+        Route::put('user-groups/{userGroup}', [UserGroupController::class, 'update'])->name('user-groups.update');
+        Route::delete('user-groups/{userGroup}', [UserGroupController::class, 'destroy'])->name('user-groups.destroy');
+    });
+
     // Danger zone: wipe all monitoring data, keep only admin accounts. Admin-only + password-
     // confirmed in the controller, and tightly rate-limited.
     Route::post('system/factory-reset', [FactoryResetController::class, 'store'])
@@ -161,6 +187,9 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     // RestrictWritesToAdmins keeps it admin-only.
     Route::delete('devices/{device}/map-positions', [DeviceController::class, 'unplace'])
         ->name('devices.map-positions.destroy');
+    // Hand a hand-placed device back to its SNMP location (GitHub #22). A write, so admin-only.
+    Route::post('devices/{device}/use-snmp-location', [DeviceController::class, 'useSnmpLocation'])
+        ->name('devices.use-snmp-location');
     // Bulk firmware upgrade - one isolated job per device. Before the
     // resource so `devices/upgrade` isn't shadowed by `devices/{device}`.
     // Dry-run the dependency checks first; both before the resource.
@@ -168,6 +197,8 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
         ->middleware('throttle:10,1')->name('devices.upgrade.preflight');
     Route::post('devices/upgrade', [DeviceController::class, 'upgrade'])
         ->middleware('throttle:10,1')->name('devices.upgrade');
+    // Up/down/unknown tallies for the header (GitHub #22). Also before the resource.
+    Route::get('devices/stats', [DeviceController::class, 'stats'])->name('devices.stats');
     Route::apiResource('devices', DeviceController::class);
 
     // A device's interfaces (link binder picks each end from these).
@@ -254,8 +285,21 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
         Route::delete('runs/{runId}', 'stop')->name('tools.stop');
     });
     // Device model icon (MikroTik product photo, fetched + cached on first sighting).
+    // Same photo keyed by model, so a map full of one model shares one cached URL (GitHub #22).
+    Route::get('device-icons', [DeviceIconController::class, 'byModel'])->name('devices.icon-by-model');
     Route::get('devices/{device}/icon', [DeviceIconController::class, 'show'])
         ->name('devices.icon');
+    // Device page: current storage entries and per-processor load (history is the storage / cpu
+    // families in App\Actions\History\HistoryFamilies).
+    Route::get('devices/{device}/storage', [DeviceHealthController::class, 'storage'])
+        ->name('devices.storage');
+    Route::get('devices/{device}/processors', [DeviceHealthController::class, 'processors'])
+        ->name('devices.processors');
+    // "I have this device open": the device page / inspector ping it every minute so the live util
+    // stream carries all of the device's ports, not just link ends (App\Support\LiveWatch).
+    // Operator-safe, it only widens what they're already allowed to see.
+    Route::post('devices/{device}/live', [DeviceHealthController::class, 'watch'])
+        ->middleware('throttle:30,1')->name('devices.live.watch');
     // Custom SNMP sensors: current readings for a device + one sensor's history series.
     Route::get('devices/{device}/sensors', [SensorController::class, 'forDevice'])
         ->name('devices.sensors');
@@ -283,6 +327,14 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     Route::get('devices/{device}/metric-samples', [InterfaceSampleController::class, 'metrics'])
         ->name('devices.metric-samples');
 
+    // Full device page (GitHub #28): history catalog + generic history read, port 95th
+    // percentile billing, the merged event timeline and extra Overview facts.
+    Route::get('devices/{device}/history/catalog', [DeviceHistoryController::class, 'catalog'])->name('devices.history.catalog');
+    Route::get('devices/{device}/history', [DeviceHistoryController::class, 'history'])->name('devices.history');
+    Route::get('devices/{device}/billing', [DeviceHistoryController::class, 'billing'])->name('devices.billing');
+    Route::get('devices/{device}/events', [DeviceHistoryController::class, 'events'])->name('devices.events');
+    Route::get('devices/{device}/summary', [DeviceHistoryController::class, 'summary'])->name('devices.summary');
+
     // Topology links (interface-to-interface). Update re-binds either end.
     Route::apiResource('links', LinkController::class)->only(['index', 'store', 'update', 'destroy']);
 
@@ -292,6 +344,11 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     // Bulk: every node moved in one gesture (group drag, Tidy) lands in one transaction (GitHub #44).
     Route::patch('maps/{map}/positions', [MapController::class, 'savePositions'])->name('maps.positions.save-many');
     Route::patch('maps/{map}/links/{link}/position', [MapController::class, 'saveLinkPosition'])->name('maps.links.position');
+    // Every device placed on this map, full rows - what the canvas and inspector draw (GitHub #22).
+    Route::get('maps/{map}/devices', [MapController::class, 'devices'])->name('maps.devices.index');
+    // Historical playback for the geo map (GitHub #22): frames of link bps + device status/rtt.
+    Route::get('maps/{map}/playback', MapPlaybackController::class)
+        ->middleware('throttle:60,1')->name('maps.playback');
     Route::post('maps/{map}/devices', [MapController::class, 'addDevice'])->name('maps.devices.add');
     Route::delete('maps/{map}/devices/{device}', [MapController::class, 'removeDevice'])->name('maps.devices.remove');
     // Layout undo stack: snapshot before a tidy, roll back from any browser.
@@ -316,6 +373,16 @@ Route::middleware(['auth:sanctum', EnsurePasskeyVerified::class, RestrictWritesT
     Route::post('maps/{map}/shares', [MapShareController::class, 'store'])->name('maps.shares.store');
     Route::patch('maps/{map}/shares/{share}', [MapShareController::class, 'update'])->name('maps.shares.update');
     Route::delete('maps/{map}/shares/{share}', [MapShareController::class, 'destroy'])->name('maps.shares.destroy');
+    // Custom background image per map (GitHub #37). Viewing follows map visibility ({map} binding
+    // runs through the Map global scope, so an out-of-scope map 404s); changing it is admin-only.
+    Route::get('maps/{map}/background', [MapBackgroundController::class, 'show'])->name('maps.background.show');
+    Route::get('maps/{map}/background/image', [MapBackgroundController::class, 'image'])->name('maps.background.image');
+    Route::middleware('admin')->group(function (): void {
+        Route::post('maps/{map}/background', [MapBackgroundController::class, 'store'])
+            ->middleware('throttle:20,1')->name('maps.background.store');
+        Route::patch('maps/{map}/background', [MapBackgroundController::class, 'update'])->name('maps.background.update');
+        Route::delete('maps/{map}/background', [MapBackgroundController::class, 'destroy'])->name('maps.background.destroy');
+    });
 
     Route::get('status-incidents', [StatusIncidentController::class, 'index'])->name('status-incidents.index');
     Route::patch('status-incidents/{statusIncident}', [StatusIncidentController::class, 'update'])->name('status-incidents.update');

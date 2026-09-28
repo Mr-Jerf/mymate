@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowsOut, CaretDown, CaretLeft, CaretRight, Check, CircleNotch, LinkSimple, MagnifyingGlass, Path, PencilSimple, Terminal, Trash, X } from '@phosphor-icons/react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ArrowsOut, CaretDown, ChartLine, CaretLeft, CaretRight, Check, CircleNotch, LinkSimple, MagnifyingGlass, Path, PencilSimple, Terminal, Trash, X } from '@phosphor-icons/react';
 import {
     useSelectedDeviceId,
     selectDevice,
@@ -12,27 +12,32 @@ import {
     setInspectorOpen,
     type IfaceFilter,
 } from '../../../lib/shellStore';
-import { useDevices } from '../../devices/api/getDevices';
+import { useDevice, useDeviceStats, useDevicesByIds, useMapDevices } from '../../devices/api/getDevices';
 import { useDeviceInterfaces } from '../api/getDeviceInterfaces';
+import { useWatchDevice } from '../../devices/api/watchDevice';
 import { useDiscoverDevice } from '../api/discoverDevice';
 import { useUpdateDevice } from '../../devices/api/updateDevice';
 import { useUpgradeDevices } from '../../devices/api/upgradeDevices';
 import { useCredentials } from '../../settings/api/credentials';
-import { useLinks } from '../api/getLinks';
+import { useDeviceLinks } from '../api/getLinks';
 import { useDeleteLink } from '../api/deleteLink';
 import { useMap, useAddDeviceToMap, useRemoveDeviceFromMap } from '../../maps/api/maps';
 import { LinkHistoryDialog } from './LinkHistoryDialog';
 import { AddLinkDialog } from './LinkBinderDialog';
 import { DeviceDialog } from '../../devices/components/DeviceDialog';
+import { UseSnmpLocationButton } from '../../devices/components/UseSnmpLocationButton';
 import { ChartModal } from './ChartModal';
 import { HealthChartModal } from './HealthChartModal';
 import { TraceModal } from './TraceModal';
+import { SetParentDialog } from './SetParentDialog';
+import { DeleteDeviceDialog } from './DeleteDeviceDialog';
 import { BackupSection } from '../../backups/components/BackupSection';
 import { DeviceResources } from './DeviceResources';
 import { ProbesSection } from './ProbesSection';
 import { ConfirmDialog } from '../../../components/Dialog';
 import { MapDevicePalette } from './MapDevicePalette';
 import { pushToast } from '../../../lib/toast';
+import { openDevicePage } from '../../device-page/lib/location';
 import { useDeviceSamples } from '../api/getDeviceSamples';
 import { useIsAdmin } from '../../auth/api/auth';
 import { InterfaceChart } from './InterfaceChart';
@@ -43,6 +48,8 @@ import { DeviceGlyph } from '../nodes/DeviceGlyph';
 import { UpgradeStatusBadge } from '../../../components/UpgradeStatusBadge';
 import { relativeTime } from '../../../lib/relativeTime';
 import { formatMbps, formatRate } from '../../../lib/formatRate';
+import { usePlaybackOverrides } from '../../geo/hooks/usePlaybackOverrides';
+import { PlaybackInspectorBanner } from '../../geo/components/PlaybackBar';
 import { UPGRADE_IN_PROGRESS, type Device, type DeviceStatus, type DeviceType, type Link, type NetworkInterface, type PollMethod } from '../../../types';
 
 const pollLabel: Record<string, string> = { snmp: 'SNMP v2c', routeros: 'RouterOS API', none: 'Ping only' };
@@ -96,6 +103,23 @@ function SpeedTag({ iface }: { iface: NetworkInterface }) {
         >
             {iface.speed_mbps ? speedLabel(iface.speed_mbps) : '-'}
         </span>
+    );
+}
+
+/**
+ * SFP / fibre optical power (GitHub #11) under a port that has a module. Only rendered when the
+ * poller read a level, so copper ports stay as they were. Alerting thresholds live on the
+ * optical-power alert policy, this just shows the numbers.
+ */
+function OpticalPower({ iface }: { iface: NetworkInterface }) {
+    if (iface.optical_rx_dbm === null && iface.optical_tx_dbm === null) return null;
+    const fmt = (v: number | null) => (v === null ? '-' : `${v.toFixed(2)} dBm`);
+    const read = iface.optical_at ? ` (read ${new Date(iface.optical_at).toLocaleTimeString()})` : '';
+    return (
+        <div className="flex gap-3 font-mono text-[10px] leading-tight text-sky-200/60" title={`SFP optical power${read}`}>
+            <span>Rx {fmt(iface.optical_rx_dbm)}</span>
+            <span>Tx {fmt(iface.optical_tx_dbm)}</span>
+        </div>
     );
 }
 
@@ -169,6 +193,30 @@ function CredentialPicker({ device }: { device: Device }) {
                     <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
             </select>
+        </div>
+    );
+}
+
+// Editable "Parent" cell (GitHub #45): the upstream device this one hangs off. Read-only here
+// until now - it drives dependency-aware alert suppression, downstream-first upgrade ordering,
+// geo coordinate inheritance and the tree layouts, so a wrong one is worth fixing on the spot.
+// Opens the same picker the map's node menu does.
+function ParentPicker({ device }: { device: Device }) {
+    const [picking, setPicking] = useState(false);
+
+    return (
+        <div className="min-w-0">
+            <p className="text-[10px] font-medium uppercase tracking-[0.16em] text-white/30">Parent</p>
+            <button
+                type="button"
+                onClick={() => setPicking(true)}
+                title="The upstream device this one depends on"
+                className="-ml-1 mt-0.5 flex w-full items-center gap-1 rounded-md bg-white/[0.03] px-1 py-0.5 text-left text-sm text-white/85 outline-none ring-1 ring-white/10 transition hover:ring-white/25 focus:ring-emerald-400/50"
+            >
+                <span className="min-w-0 flex-1 truncate">{device.parent_name ?? 'None'}</span>
+                <CaretDown weight="bold" className="h-3 w-3 shrink-0 text-white/35" />
+            </button>
+            {picking && <SetParentDialog device={device} onClose={() => setPicking(false)} />}
         </div>
     );
 }
@@ -308,6 +356,11 @@ function InterfacesList({
                                         {i.name}
                                         {peer ? <span className="text-white/35"> → {peer}</span> : null}
                                     </span>
+                                    {i.oper_status === 'down' ? (
+                                        <span className="shrink-0 rounded bg-rose-500/15 px-1 text-[9px] font-semibold uppercase text-rose-300 ring-1 ring-rose-400/25">
+                                            down
+                                        </span>
+                                    ) : null}
                                     <SpeedTag iface={i} />
                                     <span className="w-10 shrink-0 text-right font-mono text-[11px] text-white/75">{compactRate(load)}</span>
                                 </div>
@@ -319,6 +372,8 @@ function InterfacesList({
                                         {i.description}
                                     </div>
                                 ) : null}
+                                <OpticalPower iface={i} />
+
                                 <div className="h-1 overflow-hidden rounded-full bg-white/10">
                                     <div
                                         className="h-full rounded-full transition-all duration-500 ease-fluid"
@@ -483,25 +538,34 @@ export function DeviceInspector() {
     const id = useSelectedDeviceId();
     const chartMode = useDeviceChartMode(id ?? 0); // per-device chart toggle
     const inspectorOpen = useInspectorOpen(); // mobile slide-over open state
-    const { data: devices } = useDevices();
-    const { data: interfaces } = useDeviceInterfaces(id);
-    const { data: links } = useLinks();
+    const activeMapId = useActiveMapId();
+    // Just the selected device (GitHub #22) - it used to be looked up in the whole fleet, which
+    // at 25k devices never arrived. Seeded from the map's rows, so a click paints straight away.
+    const { data: liveDevice, error: deviceError } = useDevice(id);
+    const deviceGone = (deviceError as { response?: { status?: number } } | null)?.response?.status === 404;
+    const { data: mapDevices } = useMapDevices(activeMapId);
+    const { data: stats } = useDeviceStats();
+    const { data: liveInterfaces } = useDeviceInterfaces(id);
+    // While the map is playing back history, the frame's values over the live ones (GitHub #22).
+    const { device, interfaces, playback } = usePlaybackOverrides(liveDevice, liveInterfaces);
+    // all its ports on the live stream while it's selected, not just the link ends
+    useWatchDevice(deviceGone ? null : id);
+    const { data: links } = useDeviceLinks(id);
     const upgrade = useUpgradeDevices();
     const discover = useDiscoverDevice();
     const delLink = useDeleteLink();
     const [editingLink, setEditingLink] = useState<Link | null>(null);
     const [editingDevice, setEditingDevice] = useState(false);
+    const [deletingDevice, setDeletingDevice] = useState(false); // permanent delete, confirmed first
     const [addingLink, setAddingLink] = useState(false);
     const [deletingLink, setDeletingLink] = useState<{ id: number; label: string } | null>(null);
     const [confirmingUpgrade, setConfirmingUpgrade] = useState(false);
     const [chartExpanded, setChartExpanded] = useState(false);
     const [healthExpanded, setHealthExpanded] = useState(false);
     const [tracing, setTracing] = useState(false);
-    const activeMapId = useActiveMapId();
     const { data: mapDetail } = useMap(activeMapId);
     const addToMap = useAddDeviceToMap();
     const removeFromMap = useRemoveDeviceFromMap();
-    const device = devices?.find((d) => d.id === id);
 
     // Default the selection to the upstream/root device ON THE CURRENT MAP on the *first* load
     // (prefer an `internet`/uplink node, else a parentless one) - but only among devices actually
@@ -510,19 +574,32 @@ export function DeviceInspector() {
     // (clicking the empty canvas) also leaves the tools showing. A module flag (autoHomedOnce)
     // survives remounts within the session; only a deleted selection re-homes after that.
     useEffect(() => {
-        if (!devices || devices.length === 0 || !mapDetail) return;
-        const deleted = id !== null && !devices.some((d) => d.id === id);
+        if (!mapDevices || !mapDetail) return;
+        // A selection that 404s was deleted (or is out of this operator's reach).
+        const deleted = id !== null && deviceGone;
         if (deleted || (id === null && !autoHomedOnce)) {
             const onMap = new Set((mapDetail.positions ?? []).map((p) => p.device_id));
-            const here = devices.filter((d) => onMap.has(d.id));
+            const here = mapDevices.filter((d) => onMap.has(d.id));
             const root =
                 here.find((d) => d.device_type === 'internet') ??
                 here.find((d) => d.parent_device_id === null) ??
                 here[0];
-            if (root) selectDevice(root.id); // nothing on the map -> stay deselected (show tools)
+            if (root) selectDevice(root.id);
+            else if (deleted) selectDevice(null); // nothing on the map -> deselect (show tools)
         }
         autoHomedOnce = true; // after devices first load, a plain deselect no longer re-homes
-    }, [id, devices, mapDetail]);
+    }, [id, deviceGone, mapDevices, mapDetail]);
+
+    // Names for the far end of each of this device's links - those peers can be on any map.
+    const peerIds = useMemo(
+        () =>
+            id === null
+                ? []
+                : (links ?? []).flatMap((l) => (l.a_device_id === id ? [l.b_device_id] : l.b_device_id === id ? [l.a_device_id] : [])),
+        [links, id],
+    );
+    const { data: peers } = useDevicesByIds(peerIds);
+    const peerNameById = useMemo(() => new Map((peers ?? []).map((d) => [d.id, d.name])), [peers]);
 
     const ifaces = interfaces ?? [];
     // Device total throughput (sum of every interface\'s latest bps) - shown instead of
@@ -535,7 +612,7 @@ export function DeviceInspector() {
     if (!device) {
         return (
             <InspectorShell open={inspectorOpen}>
-                {devices && devices.length === 0 ? (
+                {stats?.total === 0 ? (
                     <div className="grid flex-1 place-items-center px-6 text-center text-sm text-white/35">
                         No devices yet - add one to see its details here.
                     </div>
@@ -576,7 +653,7 @@ export function DeviceInspector() {
         const l = (links ?? []).find((x) => x.a_interface_id === ifaceId || x.b_interface_id === ifaceId);
         if (!l) return null;
         const peerDev = l.a_interface_id === ifaceId ? l.b_device_id : l.a_device_id;
-        return devices?.find((d) => d.id === peerDev)?.name ?? null;
+        return peerNameById.get(peerDev) ?? null;
     };
 
     // This device\'s links - surfaced here so editing/removing a link is discoverable
@@ -609,6 +686,7 @@ export function DeviceInspector() {
 
     return (
         <InspectorShell open={inspectorOpen}>
+            {playback && <PlaybackInspectorBanner playback={playback} />}
             <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2.5">
                     {isAdmin ? (
@@ -621,7 +699,7 @@ export function DeviceInspector() {
                     <div className="min-w-0">
                         <div className="truncate text-base font-bold tracking-tight text-white">{device.name}</div>
                         <div className="truncate text-[11px] text-white/40">
-                            {device.model ?? device.vendor ?? device.mgmt_ip}
+                            {device.model ?? device.vendor ?? device.mgmt_ip ?? 'Static object'}
                         </div>
                     </div>
                 </div>
@@ -631,12 +709,17 @@ export function DeviceInspector() {
             </div>
 
             <div className="grid grid-cols-3 gap-2">
-                <a href={`winbox://${device.mgmt_ip}`} className={actionBtn}>
-                    Winbox
-                </a>
-                <a href={`ssh://${device.mgmt_ip}`} className={actionBtn}>
-                    <Terminal weight="light" className="h-3.5 w-3.5" /> SSH
-                </a>
+                {/* Only offered when there's an address to open - a static object (no IP) has none. */}
+                {device.mgmt_ip && (
+                    <>
+                        <a href={`winbox://${device.mgmt_ip}`} className={actionBtn}>
+                            Winbox
+                        </a>
+                        <a href={`ssh://${device.mgmt_ip}`} className={actionBtn}>
+                            <Terminal weight="light" className="h-3.5 w-3.5" /> SSH
+                        </a>
+                    </>
+                )}
                 {/* Path trace from the MyMate server to this device - read-only, so every operator
                     gets it. Only offered when there's a management IP to trace to (like SSH/Winbox). */}
                 {device.mgmt_ip && (
@@ -672,6 +755,11 @@ export function DeviceInspector() {
                 )}
             </div>
 
+            {/* The full device page: every graph over any range, ports, billing, events. */}
+            <button onClick={() => openDevicePage(device.id)} className={`${actionBtn} w-full justify-center`}>
+                <ChartLine weight="bold" className="h-3.5 w-3.5" /> Open device page
+            </button>
+
             {isAdmin && (
                 <button onClick={() => setEditingDevice(true)} className={`${actionBtn} w-full justify-center`}>
                     <PencilSimple weight="bold" className="h-3.5 w-3.5" /> Edit device options
@@ -687,7 +775,7 @@ export function DeviceInspector() {
             )}
 
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                <Detail label="Mgmt IP" value={device.mgmt_ip} mono />
+                <Detail label="Mgmt IP" value={device.mgmt_ip ?? 'none (static object, not polled)'} mono={device.mgmt_ip !== null} />
                 <Detail label="Site" value={device.site_name ?? '-'} />
                 <Detail label="Uptime" value={fmtUptime(device.uptime_seconds, device.uptime_at)} mono />
                 {isAdmin ? (
@@ -696,8 +784,21 @@ export function DeviceInspector() {
                     <Detail label="Poll method" value={pollLabel[device.poll_method] ?? device.poll_method} />
                 )}
                 {isAdmin && !pingOnly && <CredentialPicker device={device} />}
-                <Detail label="Parent" value={device.parent_name ?? '-'} />
+                {isAdmin ? (
+                    <ParentPicker device={device} />
+                ) : (
+                    <Detail label="Parent" value={device.parent_name ?? '-'} />
+                )}
             </div>
+
+            {/* A hand-placed pin ignores the device's SNMP location from then on - offer the way
+                back right here, not just in the editor (GitHub #22). */}
+            {isAdmin && device.geo_source === 'manual' && (
+                <div className="-mt-2 flex items-center justify-between px-0.5">
+                    <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-white/30">Location pinned by hand</span>
+                    <UseSnmpLocationButton device={device} />
+                </div>
+            )}
 
             {(device.vendor || device.model || device.serial || device.cpu || device.ram_bytes) && (
                 <Section title="Hardware">
@@ -786,7 +887,7 @@ export function DeviceInspector() {
                             const localIf = mine ? l.a_interface : l.b_interface;
                             const peerIf = mine ? l.b_interface : l.a_interface;
                             const peerDevId = mine ? l.b_device_id : l.a_device_id;
-                            const peerNm = devices?.find((d) => d.id === peerDevId)?.name ?? `device ${peerDevId}`;
+                            const peerNm = peerNameById.get(peerDevId) ?? `device ${peerDevId}`;
                             return (
                                 <div key={l.id} className="flex items-center gap-1.5 text-xs">
                                     <span className="min-w-0 flex-1 truncate text-white/80">
@@ -824,23 +925,35 @@ export function DeviceInspector() {
                 )}
             </Section>
 
-            {activeMapId !== null && isAdmin && (
+            {/* Map membership and deletion together (GitHub #45), so the reversible action and the
+                destructive one are read side by side rather than one being mistaken for the other -
+                the same pair the map's right-click node menu offers. */}
+            {isAdmin && (
                 <Section title="Map">
-                    {onThisMap ? (
-                        <button
-                            onClick={() => removeFromMap.mutate({ mapId: activeMapId, deviceId: device.id })}
-                            className={`${actionBtn} w-full justify-center`}
-                        >
-                            Remove from this map
-                        </button>
-                    ) : (
-                        <button
-                            onClick={() => addToMap.mutate({ mapId: activeMapId, deviceId: device.id })}
-                            className={`${actionBtn} w-full justify-center`}
-                        >
-                            Add to this map
-                        </button>
-                    )}
+                    {activeMapId !== null &&
+                        (onThisMap ? (
+                            <button
+                                onClick={() => removeFromMap.mutate({ mapId: activeMapId, deviceId: device.id })}
+                                title="Takes it off this map only - it stays monitored, and keeps its links and history"
+                                className={`${actionBtn} w-full justify-center`}
+                            >
+                                Remove from this map
+                            </button>
+                        ) : (
+                            <button
+                                onClick={() => addToMap.mutate({ mapId: activeMapId, deviceId: device.id })}
+                                className={`${actionBtn} w-full justify-center`}
+                            >
+                                Add to this map
+                            </button>
+                        ))}
+                    <button
+                        onClick={() => setDeletingDevice(true)}
+                        title="Deletes the device everywhere - monitoring, links and history included"
+                        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-rose-500/[0.07] px-2 py-1.5 text-xs font-medium text-rose-300/90 ring-1 ring-rose-400/15 transition-all duration-300 ease-fluid hover:bg-rose-500/15 hover:text-rose-200"
+                    >
+                        <Trash weight="light" className="h-3.5 w-3.5" /> Delete device
+                    </button>
                 </Section>
             )}
 
@@ -878,18 +991,14 @@ export function DeviceInspector() {
 
             {/* Edit a link straight from the inspector (opens the existing dialog on its Edit tab). */}
             {editingLink && (
-                <LinkHistoryDialog
-                    link={editingLink}
-                    devices={devices ?? []}
-                    defaultTab="edit"
-                    onClose={() => setEditingLink(null)}
-                />
+                <LinkHistoryDialog link={editingLink} defaultTab="edit" onClose={() => setEditingLink(null)} />
             )}
 
             {/* Add a link from this device to any other - including one on a different map. */}
-            {addingLink && (
-                <AddLinkDialog aDevice={device} devices={devices ?? []} onClose={() => setAddingLink(false)} />
-            )}
+            {addingLink && <AddLinkDialog aDevice={device} onClose={() => setAddingLink(false)} />}
+
+            {/* Delete this device outright - shares the map's confirmation, counts + all. */}
+            {deletingDevice && <DeleteDeviceDialog device={device} onClose={() => setDeletingDevice(false)} />}
 
             {/* Edit this device's options (name, IP, poll method, credential, type, monitoring). */}
             {editingDevice && (
@@ -912,7 +1021,7 @@ export function DeviceInspector() {
             )}
 
             {/* Live MTR trace to this device's mgmt IP; the run is stopped when this closes. */}
-            {tracing && (
+            {tracing && device.mgmt_ip && (
                 <TraceModal
                     deviceId={device.id}
                     deviceName={device.name}

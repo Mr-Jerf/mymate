@@ -13,6 +13,382 @@ of commit subjects.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-26
+
+### Added
+- **A full page per device, LibreNMS style (GitHub #28).** Open a device from the Devices list or with
+  "Open device page" in the map inspector and you get /devices/{id} with Overview, Graphs, Ports, Events
+  and Config tabs. The Graphs tab shows every history we keep for the device (traffic for the whole box
+  and per port, latency / loss / jitter, CPU, memory, temperature, sensors, wireless, probes, and anything
+  new we start recording) over 1h to 1y or a custom window. Every graph shares the range and the hover
+  crosshair, drag across any graph to zoom in, Back undoes the zoom, and "compare to previous period"
+  lays last week (or whatever the span is) over this one. Each graph has a min / avg / max / last table
+  underneath, traffic adds the 95th percentile, and graphs export to CSV or PNG. The range lives in the
+  URL, so a link opens the same view. Graphs only load as you scroll to them, so a big switch stays quick.
+- **95th percentile billing per port.** Click a port on the Ports tab for its own page: traffic,
+  utilisation and whatever else is recorded for it, plus a billing panel for this month, last month or
+  any dates you pick. It shows the 95th percentile of the 5 minute rates in, out and max(in, out) with the
+  top 5% of intervals dropped, and the data transferred each way, and can draw those lines on the traffic
+  graph. Tick other ports to bill them as one (summed per interval, then the percentile). Periods that
+  start before the 5 minute rollups are kept fall back to hourly averages and say so, since that reads low.
+- **Device events timeline.** Outages, alerts firing and clearing, config changes from backups, the last
+  upgrade and the last reboot, merged newest first on the device page's Events tab.
+- **Play back the geo map's history (GitHub #22).** A map in geographic mode has a new History button
+  next to the map picker. It swaps the live view for a playback bar: pick the last 1h, 6h, 24h or 7 days,
+  then scrub, step, or play it at 1x to 8x. Link
+  colours and load labels, device up/down and ping latency all show what they were at that moment,
+  coloured exactly like the live map, and red marks on the timeline show where devices went down (click
+  one to jump there). Down comes from the recorded outages, so even a 30 second drop shows on a 5 minute
+  frame. The banner says PLAYBACK and the time while you're in it, live updates can't change what you're
+  looking at, and Live takes you back with everything refreshed. Long windows read the 5 minute and hourly
+  history rollups, and big maps load in chunks so it can start playing while the rest arrives. Restricted
+  operators only get playback for maps they've been given.
+- **Playback on the regular map too, with CPU / memory / temperature and the inspector following
+  along (GitHub #22).** The non-geo map has the same History button and bar, with links coloured the
+  same way as live and cards locked in place while you look back. Device cards now show the CPU, memory
+  or temperature they had in each frame instead of going blank, on both maps. Click a device during
+  playback and the inspector shows that frame too, status, latency and loss, CPU / memory / temperature
+  and the traffic on its linked ports, under a "Viewing <time>" banner with a way back to live. Typing a
+  date and time and hitting Go now shows the network at exactly that moment (the few minutes of samples
+  up to it, and who was down right then), and "Scrub around it" opens an hour either side in one minute
+  frames.
+- **Port errors, discards and packets are graphed now.** Every interface keeps in / out errors,
+  discards and packets per second as history, rolled up to a year like traffic, plus the port's up /
+  down state over time (as % up). Over SNMP the counters are read once a minute by default
+  (`MYMATE_PORT_STATS_INTERVAL`), only for the ports we already know, packed into a few GETs; over the
+  RouterOS API they come free with every poll. The Counter32 error counters are wrap safe, and a reboot
+  resetting them doesn't draw a spike. The latest rates are on each interface in the API too.
+- **Disk and memory usage per device.** The HOST-RESOURCES storage table (disks, RAM, swap, flash) is
+  read on the metrics cadence, kept as each device's current storage list
+  (`GET /api/devices/{device}/storage`) and graphed per entry. RouterOS boxes polled over the API report
+  their memory and system disk. Reading it walks the storage table once instead of three times, so memory
+  polling got a little cheaper.
+- **Load per CPU core.** Each processor's load is kept and graphed alongside the overall CPU figure,
+  with the current per-core values at `GET /api/devices/{device}/processors`.
+- All of these show up on the device page by themselves (Graphs tab sections for packets, errors and
+  discards, port status, storage, per-core CPU, uptime and optical power; the Ports tab gets its errors
+  column).
+- **Uptime history and every reboot on the Events tab.** Uptime is read on every metrics poll now (not
+  only at discovery) and graphed, so a reboot shows as the line dropping to zero. Each reboot the poller
+  catches is also kept and listed on the device page's Events tab with how long the box had been up,
+  instead of only the latest boot.
+- **Optical power history.** SFP Rx / Tx light levels are kept as history per port, not just the latest
+  reading, so a slowly dying optic or a dirty patch is easy to spot.
+- Remote agents report all of the above for their devices too (update the agent to get it; older agents
+  keep working and just don't send the new fields). The demo shows plausible values for all of it.
+- **Port alerts show up on the map screen (GitHub #22).** When an alert starts firing or a firing one
+  clears, the map now pops it up live the way it does a device outage, so a port going down on a core
+  link gets noticed without anyone sitting on the Alerts page. Only port-level alerts toast (device
+  down already has its own popup), and it follows your alert policies, so if you only alert on uplinks
+  that's all you'll see. The Alerts item in the nav has a red count of what's firing right now, and a
+  port that's operationally down is marked "down" in the device panel's interface list. Restricted
+  operators only hear about devices on their own maps.
+- **Share the geo map on a public wallboard link (GitHub #37).** A wallboard link can now show the map's
+  geographic view as well as (or instead of) the logical one - pick Map, Geo or Both when you create the
+  link in Share wallboard, and change it later per link. A Both link gets a Map / Geo switcher in the page
+  header (and remembers it as #geo / #map in the URL, so a TV reloads onto the same one). It's still no
+  login and read only. A geo link hands out each device's drawn position on top of what the wallboard
+  already showed, and only for that map's devices; no addresses, credentials or anything else. Existing
+  links stay logical-only and show exactly what they did before.
+- **OSPF costs and link toggles on the geo map (GitHub #22).** A map in geographic mode now shows the same
+  per-end OSPF cost badges as the logical map, using your S/M/L size and colour choice (the OSPF button
+  appears on the geo map too). New Links, Bandwidth and OSPF cost toggles in the top right let you strip
+  the view back for planning, eg just the costs with no load labels. They're remembered per browser.
+- **"Use SNMP location" for a hand-placed device (GitHub #22).** Once a device is dragged on the geo map
+  or has coordinates typed in, it's a manual pin and its SNMP / RouterOS location stops moving it. Admins
+  now get a "Use SNMP location" action in the device inspector and in both device editors that hands it
+  back. We now remember the coordinates the location advertises even while a pin is manual, so if we
+  already know them the device moves there straight away; if not, the manual flag is dropped and the
+  next discovery pass places it.
+- **Embed a public wallboard in an iframe (GitHub #15).** Settings -> Security has a new "Wallboard
+  embedding" card where an admin lists the sites allowed to frame a shared wallboard link, eg your
+  intranet or a Grafana/dashboard host, one `https://host[:port]` per line (a leading `*.` covers
+  subdomains). It's empty by default so nothing changes until you add a site, and it can also be
+  preset with `MYMATE_WALL_FRAME_ANCESTORS`. Only the `/wall/...` page itself gets relaxed; the
+  console, the API and everything else still refuse to be framed. The list is global rather than per
+  link on purpose: the link is already the key, and one list is easier to check and to empty fast.
+  The public wallboard also no longer starts a session or sets any cookie, so it behaves the same
+  in a third-party iframe and doesn't leave a throwaway session behind on every poll.
+- **Custom background image on a map (GitHub #37).** Put a floor plan, site photo or rack diagram
+  behind a map's devices: map menu -> "Background image", upload a PNG, JPEG, WebP or SVG (10 MB max
+  by default, `MYMATE_MAP_BACKGROUND_MAX_KB`), then set its position, scale and opacity. It pans and
+  zooms with the map, stays behind the devices and links, and shows on that map's public wallboard
+  too. Replacing the image keeps your placement; Remove deletes it. Admin only to change, and it
+  follows map permissions, so an operator who can't see a map can't fetch its image either. Files
+  are checked by content, not name, and SVGs are cleaned on upload (script, event handlers, embedded
+  HTML and anything pointing outside the file are stripped, DOCTYPEs refused) and always served
+  sandboxed.
+- **Long-term history, a year of graphs (GitHub #28).** Raw samples still keep full detail for the
+  raw retention (14 days by default), but interface traffic, ping, device metrics, custom sensors and
+  service probes are now also rolled up into 5 minute and hourly aggregates that are kept much longer:
+  30 days of 5 minute and 400 days of hourly by default, each with its own setting in Settings -> Engine.
+  Graphs and the inspector charts get 90 day, 180 day and 1 year ranges, and they pick the right source
+  on their own - short windows read raw, longer ones the rollups, and a window that runs up to now
+  stitches the rollups onto the latest raw samples so nothing goes missing at the join. Long ranges
+  are also much quicker because they read one row per 5 minutes or hour instead of every poll. The
+  rollups keep sums and counts, so averages stay exact at every zoom level, and they keep the peak too
+  (a short burst still shows as the max in the data even on a year long graph). A new
+  `mymate:history:rollup` command runs every 5 minutes from the scheduler; `--backfill` runs it until
+  it's caught up in one go.
+
+  *Upgrade notes:* the migration adds a BRIN index on `ts` to every raw samples table, built one
+  partition at a time with `CREATE INDEX CONCURRENTLY` so polling isn't blocked, it takes about as long
+  as reading the history tables once. After that the scheduler starts rolling up the raw history you
+  already have, oldest first, a few minutes of work per run, so existing installs get their first
+  weeks of long-term history without doing anything. As a guide, 1000 interfaces at a 60s poll backfill
+  14 days in a minute or two; a 100k-interface install at 12s polls needs a couple of hours of
+  background runs. Run `php artisan mymate:history:rollup --backfill` if you'd rather do it in one go.
+  Disk: roughly 1.4 GB per 1000 interfaces for the 5 minute tier and 1.6 GB per 1000 interfaces for
+  a full 400 days of hourly, growing to that over the retention period (see REQUIREMENTS.md). The
+  scheduler (`schedule:work`, already part of every install) has to be running for rollups to happen;
+  without it everything still reads raw like before.
+- **Static objects: a device with no IP (GitHub #9, #28, #49).** Add a dumb switch, a patch panel, a
+  building or an upstream you can't reach to the map and link real devices to it, like The Dude's static
+  elements. It's a ping-only device with the IP left blank - there's a "Static" button next to Internet
+  on the map toolbar. It is drawn and linked like any device (so a router port linked to it still shows
+  that port's live traffic and status on the link) but it is never pinged, polled, probed, backed up or
+  upgraded, and its card shows "static object" instead of a load bar. A device polled over SNMP or
+  RouterOS still needs an IP. Static objects and their links survive map export and import.
+- **Operator groups (GitHub #28).** Settings -> Operators now has a Groups card. A group has a name and
+  is either read-only on all maps or restricted to the maps you tick (sub-maps come along), and you
+  add operators to it from either the group or the operator form, so "NOC" or "Field techs - North"
+  is set up once instead of per person. Someone's own per-user restriction still applies, and if any
+  of their groups is restricted they're restricted too, seeing the maps from all of those combined -
+  the most restrictive setting always wins. Admins are never in a group and always see everything.
+  It's enforced server side the same way per-user restriction is. Groups are admin only, and a group
+  that still has members can't be deleted (that would quietly give them the whole fleet). Nobody is
+  in a group after upgrading, so existing access is unchanged.
+- **The same IP can exist at more than one site (GitHub #49).** A management IP now only has to be
+  unique within its poll scope - one remote agent, or the central server - instead of across the whole
+  install, so 192.168.1.10 behind Site A's agent and 192.168.1.10 behind Site B's can both be added.
+  This is the Dude-style setup where every site reuses the same private subnet. A genuine clash (same
+  IP, same agent, including moving a device onto an agent that already polls that IP) is refused with a
+  message naming the device it collides with. Removing an agent whose devices would clash with central
+  ones once moved back to central polling is refused up front with the list, instead of failing.
+- **Manage a device's parent straight from the map (GitHub #45).** Right-click any device card for a node
+  menu: set, change or clear its parent device, take it off this map, or delete it outright. The
+  inspector's Parent row is editable too - both open the same searchable picker, so you can re-home a
+  device onto its real uplink without leaving the map. Parent is what drives dependency-aware alert
+  suppression, downstream-first upgrade ordering, geo coordinate inheritance and the tree layouts, so
+  fixing it on the map fixes all of those.
+- **Delete a device from the map (GitHub #45).** Previously the map could only *hide* a device ("Remove
+  from this map"); actually retiring one meant going to the Devices page. Both actions now sit side by
+  side, clearly labelled, in the node menu and the inspector. Delete is admin-only and always confirms
+  first - the dialog names the device and counts what goes with it (links, map placements, interfaces and
+  history), and warns you when it has child devices, which survive with no parent.
+- **Choose which interfaces raise an interface-down alert (GitHub #22).** An interface-down policy used
+  to fire for every down port on the devices it covers, so a policy meant for uplinks also paged for
+  every access port. The policy now has an Interfaces setting: every port (still the default, existing
+  policies behave exactly as before), only ports that are one end of a map link, ports whose name or
+  description matches a pattern like `sfp*, *uplink*`, or ports you pick by hand on the devices it's
+  scoped to. A narrower policy still wins over a fleet-wide one for its devices, so "all devices, every
+  port" plus "core routers, uplinks only" gives the core routers just their uplink alerts.
+- **Low-throughput alerts on a single interface, eg a VLAN (GitHub #11).** Low throughput could only
+  watch a link, so a VLAN or any port not drawn as a link couldn't be alerted on. A low-throughput policy
+  can now watch interfaces instead, picked with the same Interfaces setting (by pattern like `vlan*`, by
+  hand, or linked ports). It fires when the interface's busier direction drops under the floor while
+  its device is up. It won't let you pick every port, that would alert on every idle port you have.
+- **Run the remote agent on a MikroTik router (GitHub #38, #49).** Releases now include a small
+  agent-only container image (about 7 MB) for amd64, arm64 and armv7, attached as `docker save`
+  tarballs that RouterOS 7 can import with `/container/add file=...`. A site's own router can host the
+  agent Dude-style, no extra box needed. It's configured with the usual `MYMATE_*` env vars and keeps
+  no state, so there's nothing to mount. Step by step setup is in `agent/ROUTEROS.md`. The RouterOS
+  steps follow MikroTik's container docs and haven't been tried on real router hardware yet, so
+  feedback is welcome. The same image runs on any Docker or podman host.
+- **Ping source address per device (GitHub #11).** v1.4.0 only had the global `MYMATE_PING_SOURCE`, which
+  applied to every device - the "per-device" wording there was wrong. Now you can set a ping source
+  address on any device in its edit dialog, so eg a customer-facing router is pinged from its customer
+  interface to prove that path reaches out. The global env var is still the default for devices that
+  dont set one. The central sweep runs one fping per distinct source (still a single fping when nobody
+  sets one). Agent-polled devices honour it too, the agent binds its ICMP socket to that address, so
+  agents need updating for it to take effect (an older agent just ignores it and pings from its default
+  route). A source that isnt a local address on the server/agent makes the ping fail, so it shows down.
+- **Fibre optical Tx/Rx power, with an alert (GitHub #11).** SFP ports now show their optical receive and
+  transmit power in dBm under the port in the device inspector's interface list. Read on the metrics poll
+  from MikroTik, over the RouterOS API (`/interface/ethernet/monitor`) or over SNMP (MIKROTIK-MIB
+  optical table). Other vendors can be added through the SNMP metrics profile in config when their optical
+  table is keyed by ifIndex; none are wired in yet. New alert condition "Fibre optical power" fires per port
+  when Rx or Tx goes below (or above) a dBm threshold you set, default Rx below -25 dBm, with the usual
+  scoping and sustained-duration options. Pulling a module clears its reading. Agent-polled devices need
+  the agent updated to report optical power; older agents keep working, they just don't send it.
+- **The device page is live.** Port state, packet / error / discard rates and optical power update on the
+  Ports tab, the port page and the map inspector's port list as they're polled, and a port going down
+  flips its chip straight away. Uptime and per-processor load tick on the Overview, which also gets a
+  Processors and a Storage card (storage refreshes whenever the metrics poll reads it). Normally only
+  ports that are one end of a link are pushed live, to keep the websocket small on a big fleet; while a
+  device page or the inspector has a device open, all of that device's ports are sent. When a device
+  reboots the map pops "sw1 rebooted (was up 41d 3h)" (a batch of them becomes one "12 devices
+  rebooted"), and an open device page adds it to its Events tab. Restricted operators only get their own
+  devices, as with everything else live. Graphs on a live range keep refreshing once a minute as before.
+- **Firmware upgrade history.** Every RouterOS upgrade attempt is now kept, not just the last one, with
+  the version it went from and to, how long it took, who started it and whether it was part of a bulk
+  run. The device page Events tab lists each one ("Upgraded 7.14 -> 7.15.2 (took 3m 3s)", "Upgrade
+  failed: Did not come back online after reboot") and the Overview shows the last upgrade. The
+  outcome each device already had is carried over when you update, so the history doesn't start empty.
+  A run that died half way (worker killed mid reboot) gets closed off as interrupted when the next one
+  starts.
+- **Wireless stats for RouterOS 7 wifi (cAP ax, hAP ax2/ax3, wAP ax and friends).** Signal and client
+  count now come from the new wifi registration table (7.13+) or wifiwave2 (7.12 and older) as well as
+  the old wireless package, over the RouterOS API both centrally and from a remote agent. A CAPsMAN
+  controller reports every client across its CAPs (wifi or legacy CAPsMAN), each station counted once.
+  The wifi stack has no CCQ or SNR, so those stay blank rather than being guessed. Which menus a board
+  has is worked out once per RouterOS version, so a normal poll doesn't try all of them. Over SNMP the
+  MikroTik profile now also walks the wifi registration table (mtxrWifiRegistrationTable), which gives
+  signal and clients on newer 7.x; wifiwave2 and wifi CAPsMAN clients still need the API.
+
+### Changed
+- **Graph PNG export includes the legend.** Exporting a device page graph as PNG now gives you the
+  title, the device and time range, the chart and the min / avg / max / last / 95th table in one image
+  at 2x, instead of just the lines.
+- **Live port updates are smaller.** Each interface in the per-tick util update no longer repeats its
+  device id and status, util is sent to two decimal places and bps as whole bits. A 48 port switch's
+  frame is about 40% smaller on an ordinary tick (8.9 KB down to 5.4 KB), and the new port fields are
+  only sent when they change.
+- **`GET /api/devices` is now paginated (GitHub #22). API change.** It used to return the whole fleet
+  in one go, which at ~25,000 devices was a 36 MB response that ran php-fpm out of memory. It now
+  returns one page in Laravel's usual `data` / `links` / `meta` shape, 50 per page by default and at
+  most 200 (`?per_page=`, `?page=`). You can search with `?q=` (name, IP, vendor, model), filter with
+  `?status=`, `?device_type=`, `?poll_method=`, `?monitored=`, `?placed=`, `?map_id=`, `?ids[]=` and a
+  few others, and sort with `?sort=name|status|mgmt_ip|last_change|vendor|model` (prefix `-` to
+  reverse; `status` puts down first). `?fields=summary` gives a lean row for pickers. **If you have a
+  script that reads `/api/devices`, it now only sees the first 50 devices** - walk `meta.last_page` or
+  follow `links.next` to get the rest. New alongside it: `GET /api/devices/stats` (up/down/unknown and
+  paused counts) and `GET /api/maps/{id}/devices` (every device on one map). `GET /api/devices/{id}`
+  was already there and now also resolves coordinates inherited from the uplink chain.
+- **The console no longer loads every device up front (GitHub #22).** Each screen asks for what it
+  shows: the map pulls only the devices on the open map, the device panel fetches the one you clicked,
+  the header counts come from the new stats endpoint, and the Devices page searches, filters, sorts and
+  pages on the server (50 at a time), so it stays quick at tens of thousands of devices. The parent,
+  far-end-of-link, graph, sensor test and alert "specific devices" pickers are now search-as-you-type,
+  as are the map's "add a device" palette and the Upgrades and Backups lists (with "show more"). The
+  geo overlay draws from the compact geo feed and lists unplaced devices 200 at a time. Live status,
+  latency and CPU/memory updates reach all of these the same as before.
+- **Map links show traffic both ways (GitHub #22).** The label on a link used to show only the busier
+  direction. It now shows each direction's rate with a small arrow pointing the way that traffic is
+  going along the wire (so you can read tx and rx at a glance whichever way the cards are laid out),
+  followed by the link speed and utilisation. Same on the geo map and the wallboard.
+- **"Sustained for" is on every alert condition it applies to (GitHub #22).** The delay was only in the
+  form for device down, high utilisation and high metric, though the engine already honoured it for
+  everything. It's now there for interface down, low throughput, service probes and remote agents too.
+  Set it to a couple of minutes on an interface-down policy and a flapping port stops sending you
+  down/up pairs, it has to stay down that long before you hear about it.
+
+### Fixed
+- **Live views clear values that go away.** A port rate that stops (a counter reset) or an SFP that is
+  pulled now clears on an open device page or inspector straight away, instead of showing the last
+  value until the page is reloaded. The Ports tab's Errors column is also live now (errors plus discards
+  per second), rather than the last hour's history.
+- **A wired MikroTik polled over the API no longer shows 1 wireless client.** The "no such command"
+  reply for a missing wireless menu was being counted as a registration table row.
+- **No traffic spike when a switch's 64-bit counters drop out for a poll.** A v2c device that briefly
+  stopped answering the 64-bit octet counters fell back to the 32-bit ones, and the tick they came back
+  compared a 32-bit reading against a 64-bit one and drew a spike of tens of Gbps. The poller now
+  remembers which width it read last and skips the rate for that one tick.
+- **Large maps load device photos once per model, not once per device.** A map with 500 of the same
+  MikroTik made 500 separate photo requests; they now share one cached image per model (the wallboard
+  too). Opening a map with many cross-map links also no longer runs two database queries per link.
+- **Large fleets: maps no longer download every link, and the geo map loads fast (GitHub #22).** The
+  map, geo map and device panel used to fetch every link in the install with its interface data, which
+  at 25k devices is the next payload that falls over after the device list. They now ask only for the
+  links on the map being viewed, or touching the device being looked at. `GET /api/links` still returns
+  everything when called with no filter, and takes `?map_id=` or `?device_id=`. The geo map's device
+  feed went from 2.3s and 270 MB of server memory to about 140ms and 46 MB at 25k devices.
+- **Graph axes no longer read "250 undefined" on an empty or near-zero traffic chart.** Rates under
+  1 bps picked a unit that doesn't exist. Showed up on every device page graph while it loaded.
+- **Asymmetric links show both speeds.** A 500/50 radio link used to label itself "/500M" and then show
+  the upload direction at several hundred percent. The label now reads "/500M/50M", in the same order as
+  the direction arrows.
+- **Demo: devices sit around Brisbane and show as live.** The demo network now has real coordinates
+  (so the geo map, geo playback and "Use SNMP location" all have something to show), the header counts
+  and geo map include its devices instead of reading 0 up / 0 down, and the simulated traffic on the
+  asymmetric radio link stays within its 50M upload.
+- **SNMPv1 devices get traffic and packet graphs (airOS and other v1-only gear).** v1 can't carry the
+  64-bit counters we read, so a v1 device showed no traffic and no packets at all. It now reads the
+  32-bit ifTable counters instead (ifInOctets / ifOutOctets, and unicast + non-unicast packets), with the
+  counter wrap handled so a busy port doesn't lose a sample every few minutes. A v2c or v3 port that
+  doesn't answer the 64-bit packet counters falls back the same way. Works centrally and from a remote
+  agent (update the agent to pick it up).
+- **Remote agents collect wireless RF.** Devices polled by an agent now get signal, SNR, CCQ and the
+  client count like centrally polled ones: the vendor SNMP OIDs (MikroTik, Ubiquiti airMAX, Cambium ePMP)
+  and the RouterOS wireless registration table. They land on the map tile, the device page Wireless
+  graphs and the history. Before this an agent-polled radio never showed any RF. Needs the updated agent,
+  an older one keeps working and just leaves the RF alone.
+- **Live cpu / memory / temperature on bigger fleets.** A metrics poll sent its whole shard as one
+  websocket message, which past a few dozen devices was over Reverb's 10 KB limit and was dropped, so the
+  map tiles only moved on a refetch. It's now split to fit, the same as the port updates. Agent-polled
+  port updates are split the same way.
+- **Large fleets: header counts, the map inspector and the Devices page work again (GitHub #22).** On a
+  network of ~25,000 devices the header showed "0 up / 0 down", clicking a device on the map did nothing
+  and the Devices page hung the tab, all because the one fleet-wide device request never finished. See
+  the paginated `/api/devices` change above.
+- **A public wallboard link no longer hands out links that leave the shared map.** A link with only one
+  end on the map was included in the wallboard's link data even though it was never drawn, which gave an
+  anonymous viewer the far device's id and that port's name and traffic. Only links with both ends on the
+  shared map are sent now.
+- **Saving a device no longer turns its SNMP-placed pin into a manual one (GitHub #22).** The device
+  editors send the coordinates back on every save, which marked the location manual even when nothing
+  about it changed, so a simple rename stopped the SNMP location from ever moving the device again. Only
+  an actual change of coordinates counts as a manual pin now.
+- **Device total throughput on 24h and longer charts was inflated.** The inspector's device-wide chart
+  summed every sample in a bucket, so once a bucket held several polls per interface (anything past
+  about an hour) the total was multiplied by the number of polls in it. It now averages each interface
+  over the bucket and then adds them up.
+- **Restricted operators no longer receive live updates for devices outside their maps.** The live
+  map's websocket channel carried the whole fleet and let any signed-in user subscribe, so a
+  map-restricted operator (per-user or through a group) was sent live status, traffic and metrics for
+  devices they can't otherwise see - hidden by the UI, but readable off the socket. The shared channel
+  is now for unrestricted operators only, and a restricted operator gets their own channel carrying
+  just their devices. Nothing to configure; their live map works as before.
+- **A device found by an agent's discovery sweep is now polled by that agent.** Discovery candidates
+  never recorded which agent found them, so approving one created a *central* device the server usually
+  had no route to (it sits on the remote site's network) and it just showed down. Candidates now carry
+  their agent, approving one assigns the device to it, and the discovery queue shows "via agent X".
+  Existing queued candidates are matched to their agent by subnet on upgrade. Devices already approved
+  this way keep their current setting - set the Agent on them if they're showing down.
+- **Docker images now bundle the intended backup engine (GitHub #41).** The image cloned rusted's moving
+  `main` in a cached build layer, so every 1.7.x Docker image silently shipped an old engine without
+  the MikroTik exec-channel fix, and MikroTik backups kept failing with "captured empty configuration"
+  on Docker even though the .deb/LXC were fine. The Docker build and `build-rusted.sh` now clone one
+  pinned rusted release (`deploy/rusted/VERSION`), so all three packages bundle the same engine and
+  bumping the pin always rebuilds it. (1.8.0's image happened to pick up a fresh clone and is unaffected.)
+- **Site markers on the geo map no longer time out on a large fleet (GitHub #47).** `devices.site_id`
+  was a constrained foreign key with no index, and Postgres does not index those for you, so the
+  per-site device and down counts behind `GET /api/sites` scanned the whole devices table once per
+  site. On a 25,423-device, 2,722-site fleet that was 61 s per call, tripping a 120 s reverse-proxy
+  timeout about two thirds of the time and leaving the map empty after login. A `(site_id, status)`
+  index covers both counts and takes the same call to 0.2 s.
+- **A burst of status flips no longer hammers the outage timeline (GitHub #47).** Every up/down flip
+  invalidated the outage queries the moment it arrived. During weather a large fleet sees several
+  hundred flips a minute, which turned each open browser tab into a ~100 req/s client of
+  `/api/outages` - around 850k requests an hour from two tabs, starving php-fpm of the requests that
+  actually draw the map. The refresh is now coalesced to at most one call per 5 s window, still
+  trailing-edge so the last flip in a burst is reflected.
+- **A parent loop can no longer be created (GitHub #45).** Setting a device's parent to one of its own
+  downstream devices (A under B under A) is now refused with a clear message instead of being saved.
+  A loop would quietly break alert suppression, upgrade ordering and inherited map coordinates.
+- **Confirmation dialogs opened from the device inspector are no longer squeezed into it.** The
+  inspector pane is a blurred, sliding panel, which trapped any dialog rendered inside it - so
+  "Delete link" and the RouterOS upgrade confirmation appeared cramped into the 22rem column
+  instead of centred on screen. They now centre properly, like every other dialog.
+- **The map no longer draws a deleted device's links (GitHub #45).** Deleting a device removes its links
+  and map placements in the database, but the map kept its edges and inter-map portals on screen until
+  the next refresh. Both caches now refresh with the delete.
+- **Remote agents running as root no longer mark down hosts as up.** When the agent can't get an
+  unprivileged ping socket (typical as root in a container, or when `ping_group_range` excludes it) it
+  falls back to a raw ICMP socket, and a raw socket sees every echo reply on the box. Any reply was
+  taken as "mine", so while one host answered, every other ping running at the same time counted as
+  up too, which also made discovery sweeps report phantom devices. Replies are now matched on sender,
+  id and sequence. If the agent can't open any ICMP socket at all it now says so once in its log
+  instead of quietly showing everything down.
+- **Services no longer give up after a few fast crashes.** Supervisor's defaults (3 retries, 1s to
+  count as started) turned a short startup failure, like the database not being ready yet, into a
+  permanent FATAL until someone restarted it by hand. That's how the demo simulator stayed dead for
+  five weeks (GitHub #48). The supervisor configs (`deploy/supervisor/` and the Docker image) now use
+  `startsecs=10` and `startretries=1000`, so they keep retrying with a growing backoff. The packaged
+  systemd units get `StartLimitIntervalSec=0` for the same reason. If you copied
+  `deploy/supervisor/mymate.conf` into `/etc/supervisor/conf.d/`, copy it again and run
+  `supervisorctl reread && supervisorctl update`.
+
 ## [1.8.0] - 2026-09-10
 
 ### Added
@@ -661,7 +1037,8 @@ MikroTik's The Dude:
 - Remote agents for out-of-band networks. Ships as a `.deb`, a Proxmox LXC
   template and a Docker image.
 
-[Unreleased]: https://github.com/AthenaNetworks/mymate/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/AthenaNetworks/mymate/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/AthenaNetworks/mymate/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/AthenaNetworks/mymate/compare/v1.7.2...v1.8.0
 [1.7.2]: https://github.com/AthenaNetworks/mymate/compare/v1.7.1...v1.7.2
 [1.7.1]: https://github.com/AthenaNetworks/mymate/compare/v1.7.0...v1.7.1

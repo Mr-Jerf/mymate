@@ -4,8 +4,9 @@ import { createPortal } from 'react-dom';
 import { X, PencilSimple } from '@phosphor-icons/react';
 import { useUpdateDevice } from '../api/updateDevice';
 import { Toggle } from '../../../components/Toggle';
+import { UseSnmpLocationButton } from './UseSnmpLocationButton';
 import { useCredentials } from '../../settings/api/credentials';
-import { useDevices } from '../api/getDevices';
+import { DevicePicker, type PickedDevice } from '../../../components/DevicePicker';
 import { useGeocode, useMapConfig } from '../../geo/api/geo';
 import { apiClient } from '../../../lib/apiClient';
 import { pushToast } from '../../../lib/toast';
@@ -31,7 +32,6 @@ const label = 'block text-[11px] font-medium uppercase tracking-wide text-white/
 export function DeviceEditModal({ device, onClose }: { device: Device; onClose: () => void }) {
     const update = useUpdateDevice();
     const { data: credentials } = useCredentials();
-    const { data: devices } = useDevices();
     const { data: sites } = useQuery({
         queryKey: ['sites'],
         queryFn: async (): Promise<Array<{ id: number; name: string; state_code: string | null }>> =>
@@ -40,13 +40,15 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
 
     const [name, setName] = useState(device.name);
     const [siteId, setSiteId] = useState<string>(device.site_id != null ? String(device.site_id) : '');
-    const [mgmtIp, setMgmtIp] = useState(device.mgmt_ip);
+    const [mgmtIp, setMgmtIp] = useState(device.mgmt_ip ?? '');
     const [pollMethod, setPollMethod] = useState<PollMethod>(device.poll_method);
     const [deviceType, setDeviceType] = useState<DeviceType>(device.device_type);
     const [credentialId, setCredentialId] = useState<string>(device.credential_id != null ? String(device.credential_id) : '');
     const [sshCredentialId, setSshCredentialId] = useState<string>(device.ssh_credential_id != null ? String(device.ssh_credential_id) : '');
     const [routerosCredentialId, setRouterosCredentialId] = useState<string>(device.routeros_credential_id != null ? String(device.routeros_credential_id) : '');
-    const [parentId, setParentId] = useState<string>(device.parent_device_id != null ? String(device.parent_device_id) : '');
+    const [parent, setParent] = useState<PickedDevice | null>(
+        device.parent_device_id != null ? { id: device.parent_device_id, name: device.parent_name ?? `device ${device.parent_device_id}` } : null,
+    );
     const [monitored, setMonitored] = useState<boolean>(device.monitored);
     const [lat, setLat] = useState<string>(device.latitude != null ? String(device.latitude) : '');
     const [lng, setLng] = useState<string>(device.longitude != null ? String(device.longitude) : '');
@@ -58,7 +60,6 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
     const matchingCreds = (credentials ?? []).filter((c) => c.type === pollMethod);
     const sshCreds = (credentials ?? []).filter((c) => c.type === 'ssh');
     const routerosCreds = (credentials ?? []).filter((c) => c.type === 'routeros');
-    const parentOptions = (devices ?? []).filter((d) => d.id !== device.id); // a device can't be its own parent
 
     function changePollMethod(m: PollMethod) {
         setPollMethod(m);
@@ -70,12 +71,14 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
 
     function submit(e: FormEvent) {
         e.preventDefault();
-        if (!name.trim() || !mgmtIp.trim()) return;
+        // A blank IP is only allowed for a ping-only device, which then becomes a static object.
+        const ipRequired = pollMethod !== 'none';
+        if (!name.trim() || (ipRequired && !mgmtIp.trim())) return;
         update.mutate(
             {
                 id: device.id,
                 name: name.trim(),
-                mgmt_ip: mgmtIp.trim(),
+                mgmt_ip: mgmtIp.trim() === '' ? null : mgmtIp.trim(),
                 poll_method: pollMethod,
                 device_type: deviceType,
                 site_id: siteId === '' ? null : Number(siteId),
@@ -83,7 +86,7 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
                 credential_id: needsCredential && credentialId !== '' ? Number(credentialId) : null,
                 ssh_credential_id: sshCredentialId === '' ? null : Number(sshCredentialId),
                 routeros_credential_id: routerosCredentialId === '' ? null : Number(routerosCredentialId),
-                parent_device_id: parentId === '' ? null : Number(parentId),
+                parent_device_id: parent?.id ?? null,
                 latitude: lat.trim() === '' ? null : Number(lat),
                 longitude: lng.trim() === '' ? null : Number(lng),
             },
@@ -121,7 +124,7 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
                         </label>
                         <label className="space-y-1 block">
                             <span className={label}>Management IP</span>
-                            <input value={mgmtIp} onChange={(e) => setMgmtIp(e.target.value)} className={field} placeholder="Management IP" />
+                            <input value={mgmtIp} onChange={(e) => setMgmtIp(e.target.value)} className={field} placeholder={pollMethod === 'none' ? 'Blank = static object, not polled' : 'Management IP'} />
                         </label>
                         <label className="space-y-1 block">
                             <span className={label}>Poll method</span>
@@ -202,15 +205,11 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
                             <p className="px-1 text-[11px] text-white/35">Reads OSPF neighbours over the API on an SNMP-polled MikroTik (RouterOS doesn't expose OSPF over SNMP).</p>
                         </label>
 
-                        <label className="space-y-1 block">
+                        <div className="space-y-1 block">
                             <span className={label}>Parent (upstream device)</span>
-                            <select value={parentId} onChange={(e) => setParentId(e.target.value)} className={field}>
-                                <option value="">None</option>
-                                {parentOptions.map((d) => (
-                                    <option key={d.id} value={d.id}>{d.name}</option>
-                                ))}
-                            </select>
-                        </label>
+                            {/* Searched server-side; the device and anything below it are left out. */}
+                            <DevicePicker value={parent} onChange={setParent} params={{ not_under: device.id }} noneLabel="None" className={field} />
+                        </div>
 
                         {/* Enable/disable monitoring. */}
                         <div className="flex items-center justify-between rounded-xl bg-white/[0.03] px-3 py-2.5 ring-1 ring-white/10">
@@ -254,11 +253,17 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
                                     </button>
                                 </div>
                             )}
-                            {(lat.trim() !== '' || lng.trim() !== '') && (
-                                <button type="button" onClick={() => { setLat(''); setLng(''); }} className="text-[11px] text-white/45 hover:text-white/80">
-                                    Clear location
-                                </button>
-                            )}
+                            <div className="flex items-center gap-4">
+                                {(lat.trim() !== '' || lng.trim() !== '') && (
+                                    <button type="button" onClick={() => { setLat(''); setLng(''); }} className="text-[11px] text-white/45 hover:text-white/80">
+                                        Clear location
+                                    </button>
+                                )}
+                                <UseSnmpLocationButton
+                                    device={device}
+                                    onMoved={(d) => { setLat(d.latitude != null ? String(d.latitude) : ''); setLng(d.longitude != null ? String(d.longitude) : ''); }}
+                                />
+                            </div>
                         </div>
 
                         <div className="flex items-center justify-end gap-2.5 pt-1">
@@ -267,7 +272,7 @@ export function DeviceEditModal({ device, onClose }: { device: Device; onClose: 
                             </button>
                             <button
                                 type="submit"
-                                disabled={update.isPending || !name.trim() || !mgmtIp.trim()}
+                                disabled={update.isPending || !name.trim() || (pollMethod !== 'none' && !mgmtIp.trim())}
                                 className="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-emerald-950 shadow-[0_8px_24px_-8px_rgba(16,185,129,0.6)] transition hover:bg-emerald-400 active:scale-[0.98] disabled:opacity-40"
                             >
                                 {update.isPending ? 'Saving...' : 'Save'}
