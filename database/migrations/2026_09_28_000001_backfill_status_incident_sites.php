@@ -20,7 +20,8 @@ return new class extends Migration
             ->whereNotNull('o.status_incident_id')
             ->groupBy('o.status_incident_id')
             ->havingRaw('COUNT(DISTINCT d.site_id) = 1')
-            ->pluck(DB::raw('MIN(d.site_id)'), 'o.status_incident_id');
+            ->selectRaw('o.status_incident_id, MIN(d.site_id) as site_id')
+            ->pluck('site_id', 'status_incident_id');
 
         foreach ($candidates as $incidentId => $siteId) {
             DB::table('status_incidents')
