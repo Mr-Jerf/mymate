@@ -2,6 +2,7 @@
 
 namespace App\Actions\Agent;
 
+use App\Console\Commands\AgentHubCommand;
 use App\Enums\AgentStatus;
 use App\Enums\PollMethod;
 use App\Enums\ProbeKind;
@@ -11,13 +12,15 @@ use App\Models\Device;
 use App\Models\Probe;
 use App\Models\Subnet;
 use App\Services\Polling\DeviceMetricProfiles;
+use App\Services\Polling\OpticalPowerReader;
+use App\Services\Polling\PortStats;
 use App\Services\Snmp\SnmpCredential;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 
 /**
  * Build and publish poll/scan work for each ONLINE agent. The loop calls this on the poll
- * cadence; the agent hub ({@see \App\Console\Commands\AgentHubCommand}) is subscribed to the
+ * cadence; the agent hub ({@see AgentHubCommand}) is subscribed to the
  * Redis channel and forwards each job down that agent's WebSocket.
  *
  * We publish (rather than queue) because a job is only useful while the agent is connected -
@@ -32,7 +35,10 @@ class DispatchAgentJobs
     /** Redis pub/sub channel the hub listens on. Payload: {agent_id, poll, scan}. */
     public const CHANNEL = 'mymate:agent-dispatch';
 
-    public function __construct(private DeviceMetricProfiles $profiles) {}
+    public function __construct(
+        private DeviceMetricProfiles $profiles,
+        private OpticalPowerReader $optical,
+    ) {}
 
     /** @return int number of agents dispatched to */
     public function __invoke(): int
@@ -63,7 +69,7 @@ class DispatchAgentJobs
     public function buildJob(int $agentId): array
     {
         $devices = Device::where('agent_id', $agentId)
-            ->where('monitored', true)
+            ->pollable()
             ->with(['interfaces:id,device_id,if_index,name', 'credential'])
             ->get();
 
@@ -78,11 +84,35 @@ class DispatchAgentJobs
             Cache::put($discoverKey, now()->timestamp, now()->addDay());
         }
 
+        // Optical (SFP) power cadence (#11): light levels drift slowly and the RouterOS read is an
+        // extra API login, so only ask for it once per metrics interval, same idea as discovery.
+        $opticalInterval = max(5, (int) config('mymate.device_metrics.interval', 30));
+        $opticalKey = "agent:{$agentId}:last_optical";
+        $opticalDue = (now()->timestamp - (int) Cache::get($opticalKey, 0)) >= $opticalInterval;
+        if ($opticalDue) {
+            Cache::put($opticalKey, now()->timestamp, now()->addDay());
+        }
+
+        // Port errors / discards / packets for SNMP devices, on the same cadence the central
+        // poller reads them (poll.port_stats_interval). RouterOS reads them every tick for free.
+        $portStatsInterval = max(1, (int) config('mymate.poll.port_stats_interval', 60));
+        $portStatsKey = "agent:{$agentId}:last_port_stats";
+        $portStatsDue = (now()->timestamp - (int) Cache::get($portStatsKey, 0)) >= $portStatsInterval;
+        if ($portStatsDue) {
+            Cache::put($portStatsKey, now()->timestamp, now()->addDay());
+        }
+
         $ping = [];
         $snmp = [];
         $routeros = [];
         foreach ($devices as $d) {
-            $ping[] = ['device_id' => $d->id, 'ip' => $d->mgmt_ip];
+            // Per-device ping source (#11): the agent binds its ICMP socket to it. Only sent when
+            // set - the central MYMATE_PING_SOURCE is an address on this server, meaningless on
+            // the agent's box, so it's never used as the agent's default.
+            $ping[] = array_filter(
+                ['device_id' => $d->id, 'ip' => $d->mgmt_ip, 'source' => $d->ping_source],
+                static fn ($v) => $v !== null && $v !== '',
+            );
 
             if ($d->poll_method === PollMethod::Snmp && $d->credential?->type === 'snmp') {
                 $snmp[] = [
@@ -95,6 +125,11 @@ class DispatchAgentJobs
                         'if_index' => $i->if_index,
                     ])->all(),
                     'metrics' => $this->metricsTarget($d),
+                    // The vendor's optical table walk (null = none for this vendor / not due).
+                    'optical' => $opticalDue ? $this->optical->snmpSpec($d) : null,
+                    // Read the port counters (errors/discards/packets) this cycle, and the OIDs
+                    // for them. Older agents ignore both and just keep sending octets.
+                    'port_stats' => $portStatsDue ? self::portStatsOids() : null,
                     'discover' => $discoverDue,
                 ];
             } elseif ($d->poll_method === PollMethod::RouterOs && $d->credential?->type === 'routeros') {
@@ -108,7 +143,12 @@ class DispatchAgentJobs
                         'interface_id' => $i->id,
                         'name' => $i->name,
                     ])->all(),
+                    // Read SFP power via /interface/ethernet/monitor this cycle.
+                    'optical' => $opticalDue,
                     'discover' => $discoverDue,
+                    // Keys the agent's cache of which wireless menus (wifi / wifiwave2 / legacy /
+                    // caps-man) the board has, so an upgrade probes again. Older agents ignore it.
+                    'os_version' => (string) ($d->os_version ?? ''),
                 ];
             }
         }
@@ -234,12 +274,65 @@ class DispatchAgentJobs
             $target['hr_used'] = $hr['used'] ?? null;
         }
 
-        // Nothing to read for cpu/mem/temp -> no metrics target (still ping + throughput).
+        // Device page extras, same reads as SnmpDeviceMetricsDriver: the whole hrStorageEntry in
+        // one walk (storage list + memory from the same rows), and the uptime scalars (host
+        // first). An older agent ignores these fields.
+        if (($p['storage'] ?? true) !== false && ! empty($hr['entry'])) {
+            $target['hr_entry'] = $hr['entry'];
+        }
+        $oids = config('mymate.snmp.oids', []);
+        $target['uptime_oids'] = array_values(array_filter([$oids['hr_system_uptime'] ?? null, $oids['sys_uptime'] ?? null]));
+
+        // Wireless RF, the same profile keys SnmpDeviceMetricsDriver::wireless reads, always as
+        // lists (a profile may give a single OID as a string). Older agents ignore them.
+        $wireless = [];
+        foreach (['signal_oids', 'signal_walk', 'snr_oids', 'snr_walk', 'ccq_oids', 'ccq_walk', 'clients_walk', 'clients_value_walk'] as $key) {
+            $list = array_values(array_filter((array) ($p[$key] ?? []), static fn ($o) => is_string($o) && $o !== ''));
+            if ($list !== []) {
+                $wireless[$key] = $list;
+            }
+        }
+        $target += $wireless;
+
+        // Nothing to read for cpu/mem/temp/RF -> no metrics target (still ping + throughput).
         $hasCpu = isset($target['cpu_walk']) || isset($target['cpu_oids']);
         $hasMem = isset($target['mem']);
         $hasTemp = isset($target['temp_walk']) || isset($target['temp_oids']);
 
-        return $hasCpu || $hasMem || $hasTemp ? $target : null;
+        return $hasCpu || $hasMem || $hasTemp || isset($target['hr_entry']) || $wireless !== [] ? $target : null;
+    }
+
+    /**
+     * The per-port counter columns for the agent, under the names it reports rates as. Packets
+     * are the sum of each list (unicast first, which has to be there), same as
+     * SnmpThroughputDriver::portCounters. `counter32` are the ones that can wrap.
+     *
+     * `fallback` is the 32-bit ifTable version of a counter, for when its columns don't answer
+     * (and straight away on SNMPv1): the agent sums it inside 32 bits and treats it as Counter32.
+     * An older agent ignores it and v1 boxes just go without packets there, as before.
+     *
+     * @return array{columns: array<string, list<string>>, counter32: list<string>, fallback: array<string, list<string>>}
+     */
+    private static function portStatsOids(): array
+    {
+        $o = config('mymate.snmp.oids', []);
+        $col = static fn (string ...$keys): array => array_values(array_filter(array_map(static fn ($k) => $o[$k] ?? null, $keys)));
+
+        return [
+            'columns' => [
+                'errors_in' => $col('if_in_errors'),
+                'errors_out' => $col('if_out_errors'),
+                'discards_in' => $col('if_in_discards'),
+                'discards_out' => $col('if_out_discards'),
+                'pkts_in' => $col('if_hc_in_ucast_pkts', 'if_hc_in_mcast_pkts', 'if_hc_in_bcast_pkts'),
+                'pkts_out' => $col('if_hc_out_ucast_pkts', 'if_hc_out_mcast_pkts', 'if_hc_out_bcast_pkts'),
+            ],
+            'counter32' => PortStats::SNMP_COUNTER32,
+            'fallback' => [
+                'pkts_in' => $col('if_in_ucast_pkts', 'if_in_nucast_pkts'),
+                'pkts_out' => $col('if_out_ucast_pkts', 'if_out_nucast_pkts'),
+            ],
+        ];
     }
 
     /**

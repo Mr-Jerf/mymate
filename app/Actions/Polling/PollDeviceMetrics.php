@@ -6,6 +6,8 @@ use App\Enums\PollMethod;
 use App\Events\DeviceMetricsUpdated;
 use App\Models\Device;
 use App\Services\Polling\DeviceMetricsDriverFactory;
+use App\Services\Polling\LiveDeviceFrame;
+use App\Services\Polling\OpticalPowerReader;
 use App\Support\EngineLog;
 use App\Support\LiveBroadcast;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +25,9 @@ class PollDeviceMetrics
     public function __construct(
         private DeviceMetricsDriverFactory $drivers,
         private ReadOspf $ospf,
+        private OpticalPowerReader $optical,
+        private RecordOpticalPower $recordOptical,
+        private RecordDeviceResources $recordResources,
     ) {}
 
     /** @param  list<int>  $deviceIds */
@@ -38,6 +43,7 @@ class PollDeviceMetrics
 
         $frames = [];      // for the live broadcast
         $sampleRows = [];  // for history
+        $resources = [];   // per-CPU / storage, written for the whole batch at the end
         $failed = 0;
 
         foreach ($devices as $device) {
@@ -72,9 +78,19 @@ class PollDeviceMetrics
                 $this->writeOspfCosts($device, $read['costs']);
             }
 
+            // SFP / fibre optical power per port (GitHub #11). Its own best-effort read - null
+            // means optics aren't readable on this device, so leave any stored values alone.
+            $optical = $this->optical->read($device);
+            if ($optical !== null) {
+                ($this->recordOptical)($device->id, $optical);
+            }
+
             if ($metrics->isEmpty() && $ospf === null) {
                 continue; // nothing readable - don't stamp metrics_at or write fake zeroes
             }
+
+            // per-CPU loads + uptime (and the reboot check), for the device page
+            $extras = RecordDeviceResources::deviceAttributes($device, $metrics, now());
 
             // Latest values onto the device row (individually so one persist keeps the
             // others - no bulk upsert here, the metrics fleet is device-count, not
@@ -89,7 +105,9 @@ class PollDeviceMetrics
                 'wireless_clients' => $metrics->wirelessClients,
                 'ospf_neighbors' => $ospf,
                 'metrics_at' => now(),
+                ...$extras,
             ])->save();
+            $resources[] = [$device, $metrics];
 
             $frames[] = [
                 'device_id' => $device->id,
@@ -101,6 +119,8 @@ class PollDeviceMetrics
                 'ccq_pct' => $metrics->ccqPct,
                 'wireless_clients' => $metrics->wirelessClients,
                 'ospf_neighbors' => $ospf,
+                // uptime, per-CPU and a storage-read flag, only when read (device page)
+                ...LiveDeviceFrame::resources($extras, $metrics),
             ];
             $sampleRows[] = [
                 'device_id' => $device->id,
@@ -113,10 +133,12 @@ class PollDeviceMetrics
                 'ccq_pct' => $metrics->ccqPct,
                 'wireless_clients' => $metrics->wirelessClients,
                 'ospf_neighbors' => $ospf,
+                'uptime_s' => $metrics->uptimeSeconds,
             ];
         }
 
         $this->recordHistory($sampleRows);
+        ($this->recordResources)($resources, now());
         $this->broadcast($frames);
 
         EngineLog::debug('metrics: batch complete', [
@@ -171,6 +193,6 @@ class PollDeviceMetrics
             return;
         }
 
-        LiveBroadcast::send(new DeviceMetricsUpdated($frames));
+        LiveBroadcast::sendFrames(static fn (array $chunk) => new DeviceMetricsUpdated($chunk), $frames);
     }
 }

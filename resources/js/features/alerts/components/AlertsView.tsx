@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Bell, Plus, PencilSimple, Trash, PaperPlaneTilt, Wrench } from '@phosphor-icons/react';
 import { ConfirmDialog } from '../../../components/Dialog';
 import { ScopeEditor } from '../../../components/ScopeEditor';
+import { InterfaceFilterEditor, interfaceFilterSummary } from './InterfaceFilterEditor';
 import { useAlertPolicies, useSaveAlertPolicy, useDeleteAlertPolicy, type AlertPolicyInput } from '../api/alertPolicies';
 import {
     useMaintenanceWindows,
@@ -17,7 +18,7 @@ import { pushToast } from '../../../lib/toast';
 import type { AlertConditionType, AlertPolicy, AlertScope, AlertTransport, MaintenanceWindow } from '../../../types';
 
 // device-scoped conditions; new_discovery is fleet-wide (candidates aren\'t devices yet).
-const SCOPED_CONDITIONS: AlertConditionType[] = ['device_down', 'high_util', 'low_throughput', 'interface_down', 'upgrade_failed', 'backup_failed', 'high_metric', 'probe_down', 'probe_slow'];
+const SCOPED_CONDITIONS: AlertConditionType[] = ['device_down', 'high_util', 'low_throughput', 'interface_down', 'upgrade_failed', 'backup_failed', 'high_metric', 'probe_down', 'probe_slow', 'optical_power'];
 
 /** Short targeting label for the policy list row. */
 function scopeSummary(scope: AlertScope): string {
@@ -33,6 +34,33 @@ function scopeSummary(scope: AlertScope): string {
     }
 }
 
+// Conditions that get the generic "Sustained for" field. device_down has its own wording for
+// the same setting; the one-shot events (upgrade/backup failed, new discovery) have nothing to
+// sustain - they stay true until something else changes them.
+const SUSTAINABLE_CONDITIONS: AlertConditionType[] = ['high_util', 'low_throughput', 'interface_down', 'high_metric', 'optical_power', 'probe_down', 'probe_slow', 'agent_down'];
+
+const numberInput =
+    'w-24 rounded-xl bg-white/[0.03] px-3 py-2 text-right text-sm tabular-nums text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60';
+
+/** The breach has to hold this long before it notifies, and clear this long before it resolves. */
+function SustainedField({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+    return (
+        <>
+            <label className="flex items-center justify-between gap-3 text-sm text-white/70">
+                <span>
+                    Sustained for (min)
+                    <span className="ml-1 text-[11px] text-white/35">0 = instant</span>
+                </span>
+                <input type="number" min={0} max={1440} value={value} onChange={(e) => onChange(Number(e.target.value))} className={numberInput} />
+            </label>
+            <p className="px-1 text-[11px] text-white/35">
+                Has to stay true this long before it notifies, and clear this long before it resolves - so something
+                that flaps inside the window never sends anything.
+            </p>
+        </>
+    );
+}
+
 const field =
     'w-full rounded-xl bg-white/[0.03] px-3 py-2 text-sm text-white ring-1 ring-white/10 outline-none ' +
     'transition duration-300 ease-fluid focus:bg-white/[0.05] focus:ring-2 focus:ring-emerald-400/60';
@@ -45,6 +73,7 @@ const CONDITIONS: { value: AlertConditionType; label: string }[] = [
     { value: 'low_throughput', label: 'Low link throughput' },
     { value: 'interface_down', label: 'Interface / port down' },
     { value: 'high_metric', label: 'High device metric (CPU / memory / temperature)' },
+    { value: 'optical_power', label: 'Fibre optical power (SFP Rx / Tx)' },
     { value: 'upgrade_failed', label: 'Upgrade failed' },
     { value: 'backup_failed', label: 'Config backup failed' },
     { value: 'probe_down', label: 'Service probe down (HTTP / TCP)' },
@@ -53,6 +82,16 @@ const CONDITIONS: { value: AlertConditionType; label: string }[] = [
     { value: 'new_discovery', label: 'New device discovered' },
 ];
 
+// Threshold means something different per condition (% util, Mbps floor, ms, metric value), so
+// a new policy - or a switch of condition - starts from that condition's own sensible default. A
+// flat 90 used to leak across, giving a new low-throughput policy a 90 Mbps floor.
+const DEFAULT_THRESHOLD: Partial<Record<AlertConditionType, number>> = {
+    high_util: 90,
+    low_throughput: 1,
+    probe_slow: 1000,
+    high_metric: 90,
+};
+
 function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; transports: AlertTransport[]; onDone: () => void }) {
     const save = useSaveAlertPolicy();
     const [form, setForm] = useState<AlertPolicyInput>({
@@ -60,10 +99,12 @@ function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; tr
         name: initial?.name ?? '',
         condition: initial?.condition ?? 'device_down',
         params: {
-            threshold: initial?.params?.threshold ?? 90,
+            threshold: initial?.params?.threshold ?? DEFAULT_THRESHOLD[initial?.condition ?? 'device_down'] ?? 90,
             duration_minutes: initial?.params?.duration_minutes ?? 0,
             suppress_dependent: initial?.params?.suppress_dependent ?? true,
             metric: initial?.params?.metric ?? 'cpu',
+            target: initial?.params?.target ?? 'links',
+            interfaces: initial?.params?.interfaces ?? { mode: 'all' },
         },
         scope: initial?.scope ?? { type: 'all' },
         enabled: initial?.enabled ?? true,
@@ -86,7 +127,14 @@ function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; tr
     return (
         <div className="space-y-2.5 rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/10">
             <input className={field} placeholder="Policy name" value={form.name} onChange={(e) => set('name', e.target.value)} />
-            <select className={field} value={form.condition} onChange={(e) => set('condition', e.target.value as AlertConditionType)}>
+            <select
+                className={field}
+                value={form.condition}
+                onChange={(e) => {
+                    const condition = e.target.value as AlertConditionType;
+                    setForm((f) => ({ ...f, condition, params: { ...f.params, threshold: DEFAULT_THRESHOLD[condition] ?? f.params?.threshold } }));
+                }}
+            >
                 {CONDITIONS.map((c) => (
                     <option key={c.value} value={c.value}>
                         {c.label}
@@ -145,20 +193,6 @@ function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; tr
                             className="w-24 rounded-xl bg-white/[0.03] px-3 py-2 text-right text-sm tabular-nums text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
                         />
                     </label>
-                    <label className="flex items-center justify-between gap-3 text-sm text-white/70">
-                        <span>
-                            Sustained for (min)
-                            <span className="ml-1 text-[11px] text-white/35">0 = instant</span>
-                        </span>
-                        <input
-                            type="number"
-                            min={0}
-                            max={1440}
-                            value={form.params?.duration_minutes ?? 0}
-                            onChange={(e) => set('params', { ...form.params, duration_minutes: Number(e.target.value) })}
-                            className="w-24 rounded-xl bg-white/[0.03] px-3 py-2 text-right text-sm tabular-nums text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
-                        />
-                    </label>
                     <p className="px-1 text-[11px] text-white/35">
                         Evaluated per link, against its effective speed (override or slowest end).
                     </p>
@@ -166,6 +200,33 @@ function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; tr
             )}
             {form.condition === 'low_throughput' && (
                 <>
+                    <label className="flex items-center justify-between gap-3 text-sm text-white/70">
+                        <span>Watch</span>
+                        <select
+                            className="w-52 rounded-xl bg-white/[0.03] px-3 py-2 text-sm text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
+                            value={form.params?.target ?? 'links'}
+                            onChange={(e) => {
+                                const target = e.target.value as 'links' | 'interfaces';
+                                // Every port isn't allowed here, so start from a pattern instead.
+                                const interfaces =
+                                    target === 'interfaces' && (form.params?.interfaces?.mode ?? 'all') === 'all'
+                                        ? { mode: 'match' as const, match: 'vlan*' }
+                                        : form.params?.interfaces;
+                                set('params', { ...form.params, target, interfaces });
+                            }}
+                        >
+                            <option value="links">Links</option>
+                            <option value="interfaces">Interfaces (eg a VLAN)</option>
+                        </select>
+                    </label>
+                    {form.params?.target === 'interfaces' && (
+                        <InterfaceFilterEditor
+                            value={form.params?.interfaces ?? { mode: 'match' }}
+                            scope={form.scope ?? { type: 'all' }}
+                            allowAll={false}
+                            onChange={(interfaces) => set('params', { ...form.params, interfaces })}
+                        />
+                    )}
                     <label className="flex items-center justify-between gap-3 text-sm text-white/70">
                         <span>Throughput floor (Mbps)</span>
                         <input
@@ -178,7 +239,9 @@ function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; tr
                         />
                     </label>
                     <p className="px-1 text-[11px] text-white/35">
-                        Fires when a link's busiest direction drops below this floor while both ends are up - for a circuit that should always carry traffic. Scope it to those links.
+                        {form.params?.target === 'interfaces'
+                            ? "Fires when an interface's busiest direction (in or out) drops below this floor while its device is up - eg a VLAN that should always carry traffic, even one that isn't on a link."
+                            : "Fires when a link's busiest direction drops below this floor while both ends are up - for a circuit that should always carry traffic. Scope it to those links."}
                     </p>
                 </>
             )}
@@ -196,9 +259,16 @@ function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; tr
             )}
 
             {form.condition === 'interface_down' && (
-                <p className="px-1 text-[11px] text-white/35">
-                    Fires per port when an interface goes operationally down while its device stays up (eg a customer port drops but the uplink is fine). Read over SNMP; scope it to the devices you care about.
-                </p>
+                <>
+                    <InterfaceFilterEditor
+                        value={form.params?.interfaces ?? { mode: 'all' }}
+                        scope={form.scope ?? { type: 'all' }}
+                        onChange={(interfaces) => set('params', { ...form.params, interfaces })}
+                    />
+                    <p className="px-1 text-[11px] text-white/35">
+                        Fires per port when an interface goes operationally down while its device stays up (eg a customer port drops but the uplink is fine). Scope it to the devices you care about, and narrow the ports above if you only want some of them.
+                    </p>
+                </>
             )}
             {form.condition === 'high_metric' && (
                 <>
@@ -231,24 +301,58 @@ function PolicyForm({ initial, transports, onDone }: { initial?: AlertPolicy; tr
                             className="w-24 rounded-xl bg-white/[0.03] px-3 py-2 text-right text-sm tabular-nums text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
                         />
                     </label>
-                    <label className="flex items-center justify-between gap-3 text-sm text-white/70">
-                        <span>
-                            Sustained for (min)
-                            <span className="ml-1 text-[11px] text-white/35">0 = instant</span>
-                        </span>
-                        <input
-                            type="number"
-                            min={0}
-                            max={1440}
-                            value={form.params?.duration_minutes ?? 0}
-                            onChange={(e) => set('params', { ...form.params, duration_minutes: Number(e.target.value) })}
-                            className="w-24 rounded-xl bg-white/[0.03] px-3 py-2 text-right text-sm tabular-nums text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
-                        />
-                    </label>
                     <p className="px-1 text-[11px] text-white/35">
                         Uses each device's latest reading (CPU / memory / temperature from the metrics poll, latency
                         and loss from the ping sweep). Stale readings are ignored - a down device alerts via "Device
                         down" instead.
+                    </p>
+                </>
+            )}
+            {SUSTAINABLE_CONDITIONS.includes(form.condition) && (
+                <SustainedField
+                    value={form.params?.duration_minutes ?? 0}
+                    onChange={(duration_minutes) => set('params', { ...form.params, duration_minutes })}
+                />
+            )}
+            {form.condition === 'optical_power' && (
+                <>
+                    <div className="flex items-center justify-between gap-2 text-sm text-white/70">
+                        <span>Fire when</span>
+                        <div className="flex items-center gap-1.5">
+                            <select
+                                className="rounded-xl bg-white/[0.03] px-2 py-2 text-sm text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
+                                value={form.params?.optical ?? 'rx'}
+                                onChange={(e) => set('params', { ...form.params, optical: e.target.value as 'rx' | 'tx' })}
+                            >
+                                <option value="rx">Rx power</option>
+                                <option value="tx">Tx power</option>
+                            </select>
+                            <select
+                                className="rounded-xl bg-white/[0.03] px-2 py-2 text-sm text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
+                                value={form.params?.bound ?? 'below'}
+                                onChange={(e) => set('params', { ...form.params, bound: e.target.value as 'below' | 'above' })}
+                            >
+                                <option value="below">is below</option>
+                                <option value="above">is above</option>
+                            </select>
+                        </div>
+                    </div>
+                    <label className="flex items-center justify-between gap-3 text-sm text-white/70">
+                        <span>Threshold (dBm)</span>
+                        <input
+                            type="number"
+                            min={-60}
+                            max={30}
+                            step="0.1"
+                            value={form.params?.dbm ?? -25}
+                            onChange={(e) => set('params', { ...form.params, dbm: Number(e.target.value) })}
+                            className="w-24 rounded-xl bg-white/[0.03] px-3 py-2 text-right text-sm tabular-nums text-white ring-1 ring-white/10 outline-none focus:ring-2 focus:ring-emerald-400/60"
+                        />
+                    </label>
+                    <p className="px-1 text-[11px] text-white/35">
+                        Fires per SFP port. Rx below around -25 dBm usually means a dirty or failing fibre, Rx above
+                        about -3 dBm can overload the receiver. Read from MikroTik over the RouterOS API or SNMP on the
+                        metrics poll; ports with no module never fire.
                     </p>
                 </>
             )}
@@ -584,6 +688,11 @@ export function AlertsView() {
                                         {p.name}
                                         <span className="text-white/35"> - {p.condition_label}</span>
                                         {p.scope && p.scope.type !== 'all' && <span className="text-emerald-300/60"> - {scopeSummary(p.scope)}</span>}
+                                        {(p.condition === 'interface_down' || (p.condition === 'low_throughput' && p.params?.target === 'interfaces')) &&
+                                            interfaceFilterSummary(p.params?.interfaces) && (
+                                                <span className="text-emerald-300/60"> - {interfaceFilterSummary(p.params?.interfaces)}</span>
+                                            )}
+                                        {(p.params?.duration_minutes ?? 0) > 0 && <span className="text-white/35"> - {p.params.duration_minutes} min</span>}
                                     </span>
                                     {isAdmin && (
                                         <>

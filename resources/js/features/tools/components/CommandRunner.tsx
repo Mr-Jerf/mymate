@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Play, Stop, TerminalWindow, Warning } from '@phosphor-icons/react';
 import { useIsAdmin } from '../../auth/api/auth';
-import { useDevices } from '../../devices/api/getDevices';
+import { useDeviceList } from '../../devices/api/getDevices';
 import { CommandTemplateManager } from './CommandTemplateManager';
 import { useCommandTemplates } from '../api/commandTemplates';
 import { useCommandRun, useStartCommandRun, useStopCommandRun } from '../api/commandRuns';
@@ -10,7 +10,7 @@ const field = 'rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm t
 
 export function CommandRunner() {
     const isAdmin = useIsAdmin();
-    const devices = useDevices();
+    const devices = useDeviceList({ per_page: 200, fields: 'summary' }, { enabled: isAdmin });
     const templates = useCommandTemplates(isAdmin);
     const start = useStartCommandRun();
     const stop = useStopCommandRun();
@@ -100,7 +100,7 @@ export function CommandRunner() {
             <section className="rounded-xl border border-white/[0.08] bg-white/[0.025] p-5">
                 <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold text-white">Targets</h3><span className="text-xs text-white/35">{selected.size} selected</span></div>
                 <div className="grid gap-2 sm:grid-cols-2">
-                    {(devices.data ?? []).map((device) => (
+                    {(devices.data?.data ?? []).map((device) => (
                         <label key={device.id} className="flex cursor-pointer items-center gap-3 rounded-lg border border-white/[0.06] px-3 py-2 text-sm text-white/75 hover:bg-white/[0.04]">
                             <input type="checkbox" checked={selected.has(device.id)} onChange={() => toggle(device.id)} disabled={running} className="accent-emerald-400" />
                             <span>{device.name}</span><span className="ml-auto font-mono text-[11px] text-white/30">{device.mgmt_ip}</span>

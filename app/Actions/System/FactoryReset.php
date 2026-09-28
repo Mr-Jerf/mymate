@@ -2,10 +2,14 @@
 
 namespace App\Actions\System;
 
+use App\Actions\History\HistoryFamilies;
+use App\Actions\History\HistoryTiers;
+use App\Http\Controllers\Api\MapBackgroundController;
 use App\Models\Map;
 use App\Models\User;
 use App\Support\EngineLog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Wipe every scrap of monitoring data - devices, interfaces, links, maps, credentials,
@@ -30,6 +34,8 @@ class FactoryReset
         'credentials',
         'device_map_positions',
         'device_metric_samples',
+        'device_storages',
+        'device_upgrades',
         'devices',
         'discovery_candidates',
         'import_runs',
@@ -48,10 +54,24 @@ class FactoryReset
         'subnets',
     ];
 
+    /** The long-term history tiers (GitHub #28) and their progress go with the raw samples. */
+    private static function rollupTables(): array
+    {
+        // raw tables are listed too so a family added later (cpu, storage, optical) is never missed
+        $tables = ['history_rollup_state', ...HistoryFamilies::rawTables()];
+        foreach (array_keys(HistoryFamilies::FAMILIES) as $family) {
+            foreach (array_keys(HistoryTiers::ROLLUPS) as $tier) {
+                $tables[] = HistoryFamilies::rollupTable($family, $tier);
+            }
+        }
+
+        return $tables;
+    }
+
     public function __invoke(): void
     {
         DB::transaction(function (): void {
-            DB::statement('TRUNCATE '.implode(', ', self::TABLES).' RESTART IDENTITY CASCADE');
+            DB::statement('TRUNCATE '.implode(', ', array_unique([...self::TABLES, ...self::rollupTables()])).' RESTART IDENTITY CASCADE');
 
             // Operators are wiped with everything else; only admin accounts survive so whoever
             // triggered the reset stays able to log in and rebuild the fleet.
@@ -62,6 +82,9 @@ class FactoryReset
             // reset must leave a usable blank default rather than zero maps.
             Map::create(['name' => 'Main', 'is_default' => true, 'position' => 0]);
         });
+
+        // Map background images (GitHub #37) live on disk, not in the tables above.
+        Storage::disk('local')->deleteDirectory(MapBackgroundController::DIR);
 
         EngineLog::warning('factory reset: all monitoring data cleared, admin accounts retained');
     }

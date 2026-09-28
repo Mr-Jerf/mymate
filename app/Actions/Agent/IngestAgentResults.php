@@ -5,6 +5,8 @@ namespace App\Actions\Agent;
 use App\Actions\Devices\CaptureDeviceFacts;
 use App\Actions\Outages\RecordOutage;
 use App\Actions\Polling\PollProbes;
+use App\Actions\Polling\RecordDeviceResources;
+use App\Actions\Polling\RecordOpticalPower;
 use App\Enums\DeviceStatus;
 use App\Events\DeviceLatencyUpdated;
 use App\Events\DeviceMetricsUpdated;
@@ -14,10 +16,17 @@ use App\Models\Agent;
 use App\Models\Device;
 use App\Models\NetworkInterface;
 use App\Models\Probe;
+use App\Services\Polling\DeviceMetrics;
+use App\Services\Polling\LiveDeviceFrame;
+use App\Services\Polling\LiveInterfaceFrame;
+use App\Services\Polling\OpticalReading;
+use App\Services\Polling\PortStats;
 use App\Services\Polling\RateCalculator;
+use App\Services\Polling\StorageReading;
 use App\Services\Probes\ProbeResult;
 use App\Support\EngineLog;
 use App\Support\LiveBroadcast;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -35,7 +44,7 @@ use Illuminate\Support\Facades\DB;
  * (RateCalculator::utilPercent) so the util/colour authority stays central.
  *
  * @phpstan-type PingResult array{device_id:int, up:bool, rtt_ms?:float|null, loss_pct?:float|null, jitter_ms?:float|null}
- * @phpstan-type FlowResult array{interface_id:int, in_bps:float, out_bps:float}
+ * @phpstan-type FlowResult array{interface_id:int, in_bps:float, out_bps:float, oper_up?:bool|null, pkts_in?:float|null, errors_in?:float|null}
  */
 class IngestAgentResults
 {
@@ -44,6 +53,8 @@ class IngestAgentResults
         private RateCalculator $rates,
         private CaptureDeviceFacts $facts,
         private PollProbes $probes,
+        private RecordOpticalPower $recordOptical,
+        private RecordDeviceResources $recordResources,
     ) {}
 
     /** @param array<string,mixed> $payload */
@@ -54,6 +65,46 @@ class IngestAgentResults
         $this->ingestMetrics($agent, $payload['metrics'] ?? []);
         $this->ingestDiscovery($agent, $payload['discovery'] ?? []);
         $this->ingestProbes($agent, $payload['probes'] ?? []);
+        // Agents older than the optical support (#11) never send this key - nothing to do.
+        $this->ingestOptical($agent, $payload['optical'] ?? []);
+    }
+
+    /**
+     * Fold the agent's SFP optical power reads into the interface rows through the same matcher
+     * the central metrics tick uses (RecordOpticalPower - by port name, then ifIndex). Each entry
+     * is one device the agent read successfully, so a device reported with no ports has had its
+     * modules removed and gets cleared. Only this agent's devices are touched.
+     *
+     * @param  array<int,array<string,mixed>>  $optical
+     */
+    private function ingestOptical(Agent $agent, array $optical): void
+    {
+        if ($optical === []) {
+            return;
+        }
+        $wanted = collect($optical)->pluck('device_id')->all();
+        $owned = Device::where('agent_id', $agent->id)->whereIn('id', $wanted)->pluck('id')->flip();
+
+        foreach ($optical as $d) {
+            $deviceId = (int) ($d['device_id'] ?? 0);
+            if (! isset($owned[$deviceId])) {
+                continue; // not this agent's device - ignore
+            }
+            $readings = [];
+            foreach ((array) ($d['ports'] ?? []) as $p) {
+                if (! is_array($p)) {
+                    continue;
+                }
+                $name = trim((string) ($p['name'] ?? ''));
+                $readings[] = new OpticalReading(
+                    ifIndex: isset($p['if_index']) && (int) $p['if_index'] > 0 ? (int) $p['if_index'] : null,
+                    name: $name !== '' ? $name : null,
+                    rxDbm: OpticalReading::dbm($p['rx_dbm'] ?? null),
+                    txDbm: OpticalReading::dbm($p['tx_dbm'] ?? null),
+                );
+            }
+            ($this->recordOptical)($deviceId, $readings);
+        }
     }
 
     /**
@@ -80,7 +131,7 @@ class IngestAgentResults
             if ($probe === null) {
                 continue; // not this agent's probe - ignore
             }
-            $cert = isset($p['cert_expires']) ? \Carbon\CarbonImmutable::createFromTimestamp((int) $p['cert_expires']) : null;
+            $cert = isset($p['cert_expires']) ? CarbonImmutable::createFromTimestamp((int) $p['cert_expires']) : null;
             $result = new ProbeResult(
                 (bool) ($p['up'] ?? false),
                 self::num($p['latency_ms'] ?? null),
@@ -196,7 +247,7 @@ class IngestAgentResults
      * the device row (map tile fast path), a history sample, and the coalesced
      * DeviceMetricsUpdated broadcast. Only this agent's devices are touched.
      *
-     * @param  array<int,array{device_id:int,cpu_pct:?float,mem_used_pct:?float,temp_c:?float}>  $metrics
+     * @param  array<int,array<string,mixed>>  $metrics  device_id, cpu_pct, mem_used_pct, temp_c, the RF keys (see wireless()) and the extras (see resourceMetrics())
      */
     private function ingestMetrics(Agent $agent, array $metrics): void
     {
@@ -209,6 +260,7 @@ class IngestAgentResults
         $now = now();
         $frames = [];
         $sampleRows = [];
+        $resources = [];
 
         foreach ($metrics as $m) {
             $device = $devices->get($m['device_id'] ?? 0);
@@ -218,26 +270,46 @@ class IngestAgentResults
             $cpu = self::num($m['cpu_pct'] ?? null);
             $mem = self::num($m['mem_used_pct'] ?? null);
             $temp = self::num($m['temp_c'] ?? null);
-            if ($cpu === null && $mem === null && $temp === null) {
+            // Device page extras (per-CPU, storage, uptime). Older agents never send them.
+            $extras = self::resourceMetrics($m);
+            // Wireless RF, null when an older agent didn't send it at all (see wireless()).
+            $rf = self::wireless($m);
+            $rfRead = $rf !== null && array_filter($rf, static fn ($v) => $v !== null) !== [];
+            if ($cpu === null && $mem === null && $temp === null && $extras->isEmpty() && ! $rfRead) {
                 continue; // nothing readable - don't stamp metrics_at with an empty frame
             }
 
+            // An agent that reads RF sends it the way central polling stores it, null included,
+            // so a radio that went quiet clears. One that predates it leaves the stored values be.
+            $rfAttrs = $rf ?? [
+                'signal_dbm' => $device->signal_dbm, 'snr_db' => $device->snr_db,
+                'ccq_pct' => $device->ccq_pct, 'wireless_clients' => $device->wireless_clients,
+            ];
+
+            $attrs = RecordDeviceResources::deviceAttributes($device, $extras, $now);
             $device->forceFill([
                 'cpu_pct' => $cpu, 'mem_used_pct' => $mem, 'temp_c' => $temp, 'metrics_at' => $now,
+                ...($rf ?? []),
+                ...$attrs,
             ])->save();
+            $resources[] = [$device, $extras];
 
             $frames[] = [
                 'device_id' => $device->id, 'cpu_pct' => $cpu, 'mem_used_pct' => $mem, 'temp_c' => $temp,
-                // The agent doesn't gather wireless RF; keep the device's current values.
-                'signal_dbm' => $device->signal_dbm, 'snr_db' => $device->snr_db,
-                'ccq_pct' => $device->ccq_pct, 'wireless_clients' => $device->wireless_clients,
+                ...$rfAttrs,
+                ...LiveDeviceFrame::resources($attrs, $extras),
             ];
             $sampleRows[] = [
                 'device_id' => $device->id, 'ts' => $now,
                 'cpu_pct' => $cpu, 'mem_used_pct' => $mem, 'temp_c' => $temp,
-                'signal_dbm' => null, 'snr_db' => null, 'ccq_pct' => null, 'wireless_clients' => null,
+                // history only gets RF this agent actually read now, never a carried-over value
+                'signal_dbm' => $rf['signal_dbm'] ?? null, 'snr_db' => $rf['snr_db'] ?? null,
+                'ccq_pct' => $rf['ccq_pct'] ?? null, 'wireless_clients' => $rf['wireless_clients'] ?? null,
+                'uptime_s' => $extras->uptimeSeconds,
             ];
         }
+
+        ($this->recordResources)($resources, $now);
 
         if ($sampleRows !== [] && config('mymate.history.enabled', true)) {
             try {
@@ -248,8 +320,82 @@ class IngestAgentResults
         }
 
         if ($frames !== [] && config('mymate.device_metrics.broadcast', true)) {
-            LiveBroadcast::send(new DeviceMetricsUpdated($frames));
+            LiveBroadcast::sendFrames(static fn (array $chunk) => new DeviceMetricsUpdated($chunk), $frames);
         }
+    }
+
+    /**
+     * The per-CPU / storage / uptime part of an agent metrics entry as a DeviceMetrics, so it goes
+     * through the same RecordDeviceResources as the central tick.
+     *
+     *   uptime_s  int seconds
+     *   cpus      [{index, load_pct}]
+     *   storage   [{key, descr, type, units, size, used}] raw hrStorage values (type is the
+     *             hrStorageType OID, or already one of our names from a RouterOS read; size/used
+     *             in allocation units). Absent or null = not read, [] = read and nothing there.
+     *
+     * @param  array<string, mixed>  $m
+     */
+    private static function resourceMetrics(array $m): DeviceMetrics
+    {
+        $cpus = null;
+        foreach ((array) ($m['cpus'] ?? []) as $c) {
+            if (is_array($c) && isset($c['index']) && is_numeric($c['load_pct'] ?? null)) {
+                $cpus[(int) $c['index']] = max(0.0, min(100.0, (float) $c['load_pct']));
+            }
+        }
+
+        $storages = null;
+        if (isset($m['storage']) && is_array($m['storage'])) {
+            $cols = ['descr' => [], 'type' => [], 'units' => [], 'size' => [], 'used' => []];
+            foreach ($m['storage'] as $e) {
+                $key = is_array($e) ? trim((string) ($e['key'] ?? '')) : '';
+                if ($key === '') {
+                    continue;
+                }
+                foreach (array_keys($cols) as $col) {
+                    if (isset($e[$col])) {
+                        $cols[$col][$key] = (string) $e[$col];
+                    }
+                }
+            }
+            $storages = StorageReading::fromHrColumns($cols['descr'], $cols['type'], $cols['units'], $cols['size'], $cols['used']);
+        }
+
+        $uptime = $m['uptime_s'] ?? null;
+
+        return new DeviceMetrics(
+            uptimeSeconds: is_numeric($uptime) && $uptime >= 0 ? (int) $uptime : null,
+            cpuLoads: $cpus,
+            storages: $storages,
+        );
+    }
+
+    /**
+     * The wireless RF part of an agent metrics entry, tidied the same way the central drivers do
+     * it (signal/snr to one decimal, ccq clamped to 0-100, a whole client count). Null when the
+     * entry has none of the keys, that's an agent from before it read RF. A key sent as null is
+     * a real "not available" and is kept as null.
+     *
+     * @param  array<string, mixed>  $m
+     * @return array{signal_dbm: ?float, snr_db: ?float, ccq_pct: ?float, wireless_clients: ?int}|null
+     */
+    private static function wireless(array $m): ?array
+    {
+        $keys = ['signal_dbm', 'snr_db', 'ccq_pct', 'wireless_clients'];
+        if (array_intersect($keys, array_keys($m)) === []) {
+            return null;
+        }
+        $signal = self::num($m['signal_dbm'] ?? null);
+        $snr = self::num($m['snr_db'] ?? null);
+        $clients = self::num($m['wireless_clients'] ?? null);
+
+        return [
+            'signal_dbm' => $signal === null ? null : round($signal, 1),
+            'snr_db' => $snr === null ? null : round($snr, 1),
+            'ccq_pct' => DeviceMetrics::clampPct(self::num($m['ccq_pct'] ?? null)),
+            'wireless_clients' => $clients === null || $clients < 0 ? null : (int) round($clients),
+        ];
     }
 
     /** Coerce an incoming metric to a float or null (an agent sends null for an unread metric). */
@@ -366,19 +512,34 @@ class IngestAgentResults
             $utilIn = $this->rates->utilPercent($inBps, $iface->speed_mbps);
             $utilOut = $this->rates->utilPercent($outBps, $iface->speed_mbps);
 
+            // Port rates (per second) the agent worked out from its own counter deltas, only on
+            // a cycle it read them, and the oper status. Older agents send neither.
+            $port = [];
+            foreach (PortStats::RATES as $name) {
+                $port[$name] = self::num($f[$name] ?? null);
+            }
+            $read = array_filter($port, static fn ($v) => $v !== null);
+            $operUp = isset($f['oper_up']) && is_bool($f['oper_up']) ? $f['oper_up'] : null;
+
             DB::table('interfaces')->where('id', $iface->id)->update([
                 'bps_in' => $inBps, 'bps_out' => $outBps,
                 'util_in' => $utilIn, 'util_out' => $utilOut,
                 'last_ts' => $now, 'updated_at' => $now,
+                ...$read,
+                ...($operUp === null ? [] : ['oper_status' => $operUp ? 'up' : 'down']),
             ]);
             $sampleRows[] = [
                 'interface_id' => $iface->id, 'ts' => $now,
                 'bps_in' => $inBps, 'bps_out' => $outBps, 'util_in' => $utilIn, 'util_out' => $utilOut,
+                ...$port,
+                'oper_up' => $operUp,
             ];
-            $frames[$iface->device_id][] = [
+            $frames[$iface->device_id][] = LiveInterfaceFrame::compact([
                 'interface_id' => $iface->id, 'util_in' => $utilIn, 'util_out' => $utilOut,
-                'speed_mbps' => $iface->speed_mbps, 'bps_in' => $inBps, 'bps_out' => $outBps, 'status' => 'up',
-            ];
+                'speed_mbps' => $iface->speed_mbps, 'bps_in' => $inBps, 'bps_out' => $outBps,
+                // $iface is the row from before the update above, so these are the changes
+                ...LiveInterfaceFrame::extras($iface, $operUp, $read, $read !== []),
+            ]);
         }
 
         $this->recordHistory($sampleRows);
@@ -388,7 +549,9 @@ class IngestAgentResults
             foreach ($frames as $deviceId => $ifaceFrames) {
                 $devices[] = ['device_id' => $deviceId, 'status' => DeviceStatus::Up->value, 'interfaces' => $ifaceFrames];
             }
-            LiveBroadcast::send(new InterfaceUtilUpdated($devices));
+            // Split by bytes: an agent's report isn't narrowed to link ends like the central
+            // tick, so a site's worth of ports in one message could be over Reverb's limit.
+            LiveBroadcast::sendFrames(static fn (array $chunk) => new InterfaceUtilUpdated($chunk), $devices);
         }
     }
 

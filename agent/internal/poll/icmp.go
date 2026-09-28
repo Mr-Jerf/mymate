@@ -1,8 +1,12 @@
 package poll
 
 import (
+	"log/slog"
 	"net"
 	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -10,32 +14,53 @@ import (
 )
 
 // pingOnce sends one ICMP echo to host and returns the round-trip time (ms) and whether an echo
-// reply came back within timeout. It opens its own socket per call so concurrent pings don't cross
-// replies.
+// reply came back within timeout. It opens its own socket per call, which keeps concurrent pings
+// apart on a ping socket (the kernel demuxes by id) but NOT on a raw one, see below.
 //
 // It prefers an unprivileged "ping" datagram socket (udp4 - works when
 // net.ipv4.ping_group_range permits the user), falling back to a raw socket (needs
 // CAP_NET_RAW, which the shipped systemd unit grants). Same privilege model as fping.
-func pingOnce(host string, timeout time.Duration) (float64, bool) {
+//
+// The raw path matters more than it looks: as root inside a container (RouterOS, docker) the
+// ping socket is usually refused by ping_group_range, so we end up on the raw socket. A raw
+// socket sees every echo reply arriving at the box, not just ours, so replies are matched on
+// sender + id + seq below. Without that one live host would mark every concurrent ping up.
+//
+// source, when set, is the local address to send FROM (per-device ping source, #11) - the socket
+// is bound to it instead of 0.0.0.0, the same as fping -S. A source that isn't a local IPv4
+// address fails the bind and the ping reports unreachable rather than quietly using another
+// path, so a misconfigured source shows up as down instead of a false "up".
+func pingOnce(host, source string, timeout time.Duration) (float64, bool) {
 	dst, err := net.ResolveIPAddr("ip4", host)
 	if err != nil {
 		return 0, false
 	}
 
-	conn, err := icmp.ListenPacket("udp4", "0.0.0.0")
+	bind, ok := bindAddr(source)
+	if !ok {
+		return 0, false
+	}
+
+	conn, err := icmp.ListenPacket("udp4", bind)
 	unprivileged := true
 	if err != nil {
-		conn, err = icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+		conn, err = icmp.ListenPacket("ip4:icmp", bind)
 		unprivileged = false
 	}
 	if err != nil {
+		// Otherwise every device just reads as down with no clue why. Once is plenty.
+		noICMPWarn.Do(func() {
+			slog.Error("cannot open an ICMP socket, every ping will fail: needs CAP_NET_RAW or a net.ipv4.ping_group_range that covers this user", "error", err)
+		})
 		return 0, false
 	}
 	defer conn.Close()
 
+	id := os.Getpid() & 0xffff
+	seq := int(pingSeq.Add(1) & 0xffff)
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
-		Body: &icmp.Echo{ID: os.Getpid() & 0xffff, Seq: 1, Data: []byte("mymate-agent")},
+		Body: &icmp.Echo{ID: id, Seq: seq, Data: []byte("mymate-agent")},
 	}
 	wb, err := msg.Marshal(nil)
 	if err != nil {
@@ -56,7 +81,7 @@ func pingOnce(host string, timeout time.Duration) (float64, bool) {
 
 	rb := make([]byte, 1500)
 	for time.Now().Before(deadline) {
-		n, _, err := conn.ReadFrom(rb)
+		n, peer, err := conn.ReadFrom(rb)
 		if err != nil {
 			return 0, false // timeout / error -> unreachable
 		}
@@ -64,29 +89,72 @@ func pingOnce(host string, timeout time.Duration) (float64, bool) {
 		if err != nil {
 			continue
 		}
-		if rm.Type == ipv4.ICMPTypeEchoReply {
+		// On a ping socket the kernel rewrites the id to the socket's own and only hands us
+		// our replies, so the id check is for the raw path only.
+		if isOurEchoReply(rm, peer, dst.IP, id, seq, !unprivileged) {
 			return float64(time.Since(start).Microseconds()) / 1000.0, true
 		}
 	}
 	return 0, false
 }
 
+// pingSeq hands every echo its own sequence number so concurrent pings on raw sockets (which
+// all share the process id as their echo id) can tell their replies apart.
+var pingSeq atomic.Uint32
+
+var noICMPWarn sync.Once
+
+// isOurEchoReply reports whether a received message is the reply to the echo we sent to dst.
+func isOurEchoReply(rm *icmp.Message, peer net.Addr, dst net.IP, id, seq int, checkID bool) bool {
+	if rm == nil || rm.Type != ipv4.ICMPTypeEchoReply {
+		return false
+	}
+	echo, ok := rm.Body.(*icmp.Echo)
+	if !ok || echo.Seq != seq || (checkID && echo.ID != id) {
+		return false
+	}
+	var from net.IP
+	switch a := peer.(type) {
+	case *net.IPAddr:
+		from = a.IP
+	case *net.UDPAddr:
+		from = a.IP
+	default:
+		return false
+	}
+	return from.Equal(dst)
+}
+
 // ping reports only reachability - used by discovery, where latency doesn't matter.
 func ping(host string, timeout time.Duration) bool {
-	_, ok := pingOnce(host, timeout)
+	_, ok := pingOnce(host, "", timeout)
 	return ok
+}
+
+// bindAddr is the local address to listen on: 0.0.0.0 when no source is set, else the source
+// itself. ok is false for a source that isn't an IPv4 address (the agent pings over ip4 only).
+func bindAddr(source string) (string, bool) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "0.0.0.0", true
+	}
+	ip := net.ParseIP(source)
+	if ip == nil || ip.To4() == nil {
+		return "", false
+	}
+	return ip.To4().String(), true
 }
 
 // pingStats sends `count` echoes and summarises them the way the central fping sweep does: up if
 // any replied, plus the average rtt over the replies, loss %, and jitter (the mean absolute
 // difference between consecutive rtts). A fully-missed host is down with 100% loss and no rtt.
-func pingStats(host string, timeout time.Duration, count int) (up bool, rttMs, lossPct, jitterMs float64) {
+func pingStats(host, source string, timeout time.Duration, count int) (up bool, rttMs, lossPct, jitterMs float64) {
 	if count < 1 {
 		count = 1
 	}
 	rtts := make([]float64, 0, count)
 	for i := 0; i < count; i++ {
-		if rtt, ok := pingOnce(host, timeout); ok {
+		if rtt, ok := pingOnce(host, source, timeout); ok {
 			rtts = append(rtts, rtt)
 		}
 	}

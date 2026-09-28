@@ -13,7 +13,7 @@ import {
     type Connection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowCounterClockwise, ArrowsOutCardinal, CaretDown, CircleDashed, DotsThreeVertical, Globe, Graph, Info, LineSegment, LinkBreak, MagnetStraight, Note, Plus, PushPin, Sparkle, TreeStructure, WaveSine } from '@phosphor-icons/react';
+import { ArrowCounterClockwise, ArrowsOutCardinal, CaretDown, CircleDashed, Cube, DotsThreeVertical, Globe, Graph, Info, LineSegment, LinkBreak, MagnetStraight, Note, Plus, PushPin, Sparkle, TreeStructure, WaveSine } from '@phosphor-icons/react';
 import { DeviceDialog, type DeviceDialogDefaults } from '../../devices/components/DeviceDialog';
 import { useTheme } from '../../../lib/theme';
 import { DeviceNode } from '../nodes/DeviceNode';
@@ -30,14 +30,21 @@ import { MapLinkEditor } from './MapLinkEditor';
 import { MapSwitcher } from '../../maps/components/MapSwitcher';
 import { MapBreadcrumb } from '../../maps/components/MapBreadcrumb';
 import { MapSearch } from './MapSearch';
+import { MapNodeMenu, type NodeMenuState } from './MapNodeMenu';
+import { SetParentDialog } from './SetParentDialog';
+import { DeleteDeviceDialog } from './DeleteDeviceDialog';
 import { MapControls } from './MapControls';
+import { MapBackground } from './MapBackground';
 import { OspfCostControl } from './OspfCostControl';
 import { ConfirmDialog } from '../../../components/Dialog';
-import { useMap, useSaveMapPositions, isEmptyBatch, type MapPositionBatch, useAddDeviceToMap, useCreateMapLink, useUpdateMapLink, useDeleteMapLink, useRemoveChildMap, useCreateMapNote, useUpdateMapNote, useDeleteMapNote } from '../../maps/api/maps';
+import { useMap, useSaveMapPositions, isEmptyBatch, type MapPositionBatch, useAddDeviceToMap, useRemoveDeviceFromMap, useCreateMapLink, useUpdateMapLink, useDeleteMapLink, useRemoveChildMap, useCreateMapNote, useUpdateMapNote, useDeleteMapNote } from '../../maps/api/maps';
 import { useMapChannel } from '../hooks/useMapChannel';
+import { useMapCanvasPlayback } from '../hooks/useMapCanvasPlayback';
+import { PlaybackBadge, PlaybackBar } from '../../geo/components/PlaybackBar';
 import { useIsAdmin } from '../../auth/api/auth';
-import { useDevices } from '../../devices/api/getDevices';
-import { useLinks } from '../api/getLinks';
+import { useMapDevices } from '../../devices/api/getDevices';
+import { useUpdateDevice } from '../../devices/api/updateDevice';
+import { useMapLinks } from '../api/getLinks';
 import { useFaceSensors } from '../../settings/api/sensors';
 import { useDeleteLink } from '../api/deleteLink';
 import { useUpdateLink } from '../api/updateLink';
@@ -46,7 +53,8 @@ import { useCaptureLayoutSnapshot, useUndoLayout, useLayoutSnapshotCount } from 
 import { computeData, linkUtil, metaOf, type EdgeMeta, type UtilMap } from '../lib/edgeData';
 import { selectDevice, setEdgeStyle, setEdgeAttach, setInspectorOpen, setLayoutKind, useActiveMapId, useEdgeStyle, useEdgeAttach, useLayoutKind, useSelectedDeviceId } from '../../../lib/shellStore';
 import { pushToast } from '../../../lib/toast';
-import type { Device, DeviceStatus, FaceSensorReading, InterfaceUtilUpdatedPayload } from '../../../types';
+import { fmtDuration } from '../../device-page/lib/format';
+import type { AlertStateChangedPayload, Device, DeviceRebootedPayload, DeviceStatus, FaceSensorReading, InterfaceUtilUpdatedPayload } from '../../../types';
 
 /** Compare two devices' face-sensor label sets by value, so a routine refetch that returns the
  *  same readings doesn't re-render the card (GitHub #40). */
@@ -96,10 +104,17 @@ const edgeBtn = (active: boolean): string =>
 
 export function MapCanvas() {
     const isAdmin = useIsAdmin();
-    const { data: devices, isLoading } = useDevices();
-    const { data: links } = useLinks();
-    const { data: faceSensors } = useFaceSensors(); // custom SNMP readings shown on device cards (#40)
     const activeMapId = useActiveMapId();
+    // Only this map's devices, not the fleet (GitHub #22) - everything below that looks a device
+    // up in `devices` is looking at something drawn on this canvas.
+    const { data: liveDevices, isLoading } = useMapDevices(activeMapId);
+    const { data: liveLinks } = useMapLinks(activeMapId);
+    // History playback (GitHub #22): while it's on, `devices` / `links` are the frozen frame and
+    // `play.util` etc stand in for the socket-fed state below, which carries on unseen.
+    const play = useMapCanvasPlayback(activeMapId, liveDevices, liveLinks);
+    const { devices, links } = play;
+    const canDrag = isAdmin && !play.pb.active; // nothing moves while looking at the past
+    const { data: faceSensors } = useFaceSensors(); // custom SNMP readings shown on device cards (#40)
     const edgeStyle = useEdgeStyle(); // curved (default) / straight link geometry
     const edgeAttach = useEdgeAttach(); // 'auto' floats links to the facing side; 'fixed' keeps pinned sides
     const layoutKind = useLayoutKind(); // last-applied auto-layout algorithm
@@ -119,6 +134,8 @@ export function MapCanvas() {
     const deleteMapNote = useDeleteMapNote();
     const deleteLink = useDeleteLink();
     const addToMap = useAddDeviceToMap();
+    const removeFromMap = useRemoveDeviceFromMap();
+    const updateDevice = useUpdateDevice(); // node menu: clear a parent without opening the picker
     const { fitView, screenToFlowPosition } = useReactFlow();
     const theme = useTheme();
 
@@ -139,6 +156,10 @@ export function MapCanvas() {
     const [showChildLinks, setShowChildLinks] = useState(true); // toggle the aggregated device links between child maps (GitHub #9)
     const [layoutMenu, setLayoutMenu] = useState(false); // the "Tidy ▾" layout-algorithm dropdown
     const [toolsMenu, setToolsMenu] = useState(false); // mobile: all map tools behind one overflow button
+    // Right-click device management (GitHub #45): the node menu, and the two dialogs it opens.
+    const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
+    const [parentForId, setParentForId] = useState<number | null>(null); // parent picker
+    const [deleteDeviceId, setDeleteDeviceId] = useState<number | null>(null); // delete confirmation
 
     // Stable so threading it into edge data doesn\'t churn the edge-build effect.
     const requestDelete = useCallback((linkId: number) => setDeleteLinkId(linkId), []);
@@ -179,9 +200,12 @@ export function MapCanvas() {
             }
             return next;
         });
+        // A frame can carry only `ports` (the rest of a device someone has open, split off to fit),
+        // those aren't link ends and say nothing about the tile, so skip them rather than null it.
         setDeviceUtil((prev) => {
             const next = { ...prev };
             for (const dev of payload.devices) {
+                if (dev.interfaces.length === 0) continue;
                 let max: number | null = null;
                 for (const f of dev.interfaces) {
                     for (const v of [f.util_in, f.util_out]) {
@@ -197,6 +221,7 @@ export function MapCanvas() {
         setDeviceLoad((prev) => {
             const next = { ...prev };
             for (const dev of payload.devices) {
+                if (dev.interfaces.length === 0) continue;
                 let max: number | null = null;
                 for (const f of dev.interfaces) {
                     for (const v of [f.bps_in, f.bps_out]) {
@@ -251,7 +276,62 @@ export function MapCanvas() {
             statusFlush.current = null;
         }, 3000);
     }, []);
-    useMapChannel(handleUtil, handleStatus);
+    // Port alerts on the map screen (GitHub #22): a port going down (or a per-port optical / throughput
+    // alert) pops up like a device outage does. Only port-level alerts - device up/down already has
+    // its own toast above. Coalesced the same way, so a switch reboot taking 24 ports down is one
+    // summary, not 24 toasts. Which ports count is whatever the alert policy watches.
+    const alertBuf = useRef<{ down: number; up: number; last: AlertStateChangedPayload | null }>({ down: 0, up: 0, last: null });
+    const alertFlush = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const handleAlert = useCallback((e: AlertStateChangedPayload) => {
+        if (e.interface_id === null) return;
+        const b = alertBuf.current;
+        if (e.state === 'firing') b.down++;
+        else b.up++;
+        b.last = e;
+        if (alertFlush.current) return;
+        alertFlush.current = setTimeout(() => {
+            const a = alertBuf.current;
+            if (a.down + a.up === 1 && a.last) {
+                pushToast({
+                    title: a.last.state === 'firing' ? 'Port alert' : 'Port alert cleared',
+                    detail: a.last.message,
+                    tone: a.last.state === 'firing' ? 'down' : 'up',
+                    key: `port-alert-${a.last.interface_id}`,
+                }, 10000);
+            } else {
+                const parts: string[] = [];
+                if (a.down) parts.push(`${a.down} port alert${a.down === 1 ? '' : 's'}`);
+                if (a.up) parts.push(`${a.up} cleared`);
+                pushToast({ title: parts.join(', '), detail: 'See the Alerts page for the list', tone: a.down >= a.up ? 'down' : 'up', key: 'port-alert-summary' }, 10000);
+            }
+            alertBuf.current = { down: 0, up: 0, last: null };
+            alertFlush.current = null;
+        }, 3000);
+    }, []);
+    useEffect(() => () => { if (alertFlush.current) clearTimeout(alertFlush.current); }, []);
+    // Reboots (uptime went backwards on the metrics poll), coalesced the same way: a power blip
+    // restarting a whole site is one "12 devices rebooted", not a toast each.
+    const rebootBuf = useRef<{ n: number; last: DeviceRebootedPayload | null }>({ n: 0, last: null });
+    const rebootFlush = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const handleReboot = useCallback((e: DeviceRebootedPayload) => {
+        const b = rebootBuf.current;
+        b.n++;
+        b.last = e;
+        if (rebootFlush.current) return;
+        rebootFlush.current = setTimeout(() => {
+            const r = rebootBuf.current;
+            if (r.n === 1 && r.last) {
+                const was = r.last.previous_uptime_s !== null ? ` (was up ${fmtDuration(r.last.previous_uptime_s)})` : '';
+                pushToast({ title: `${r.last.name} rebooted${was}`, detail: 'Uptime went backwards on the last poll', tone: 'info', key: `device-reboot-${r.last.device_id}` }, 10000);
+            } else {
+                pushToast({ title: `${r.n} devices rebooted`, detail: 'See each device page Events tab', tone: 'info', key: 'device-reboot-summary' }, 10000);
+            }
+            rebootBuf.current = { n: 0, last: null };
+            rebootFlush.current = null;
+        }, 3000);
+    }, []);
+    useEffect(() => () => { if (rebootFlush.current) clearTimeout(rebootFlush.current); }, []);
+    useMapChannel(handleUtil, handleStatus, handleAlert, handleReboot);
 
     const statusById = useMemo<Record<number, DeviceStatus>>(
         () => Object.fromEntries((devices ?? []).map((d) => [d.id, d.status])),
@@ -260,9 +340,9 @@ export function MapCanvas() {
     const statusRef = useRef(statusById);
     statusRef.current = statusById;
     const deviceUtilRef = useRef(deviceUtil);
-    deviceUtilRef.current = deviceUtil;
+    deviceUtilRef.current = play.deviceUtil ?? deviceUtil;
     const deviceLoadRef = useRef(deviceLoad);
-    deviceLoadRef.current = deviceLoad;
+    deviceLoadRef.current = play.deviceLoad ?? deviceLoad;
     // Current data read inside the (membership-keyed) rebuild effect, so it doesn't need to
     // list these as deps and re-run on every data refetch.
     const mapDevicesRef = useRef(mapDevices);
@@ -349,7 +429,7 @@ export function MapCanvas() {
                     bps: il.bps,
                     util: il.util,
                 },
-                draggable: isAdmin,
+                draggable: canDrag,
                 selectable: true,
             };
         });
@@ -359,7 +439,7 @@ export function MapCanvas() {
             type: 'childmap',
             position: { x: c.node_x ?? 40 + (i % 5) * 240, y: c.node_y ?? 40 + Math.floor(i / 5) * 140 },
             data: { mapId: c.id, name: c.name, deviceCount: c.device_count, onDetach: isAdmin ? () => requestDetachChild(c.id) : undefined },
-            draggable: isAdmin,
+            draggable: canDrag,
             selectable: true,
         }));
         // Free-text notes / labels (GitHub #11).
@@ -373,7 +453,7 @@ export function MapCanvas() {
                 onSaveStyle: isAdmin ? (patch: MapNoteStylePatch) => { const m = activeMapIdRef.current; if (m !== null) updateMapNote.mutate({ mapId: m, noteId: n.id, ...patch }); } : undefined,
                 onRemove: isAdmin ? () => { const m = activeMapIdRef.current; if (m !== null) deleteMapNote.mutate({ mapId: m, noteId: n.id }); } : undefined,
             },
-            draggable: isAdmin,
+            draggable: canDrag,
             selectable: true,
         }));
         // Carry each node's selection and measured size across the rebuild. A position save patches
@@ -387,7 +467,7 @@ export function MapCanvas() {
                 return p ? { ...n, measured: p.measured, selected: p.selected } : n;
             });
         });
-    }, [membershipKey, setNodes, isAdmin]);
+    }, [membershipKey, setNodes, isAdmin, canDrag]);
 
     // Intra-map links -> util edges; inter-map links -> dashed portal edges. Seed util.
     useEffect(() => {
@@ -458,24 +538,27 @@ export function MapCanvas() {
         });
     }, [intraLinks, interMapLinks, mapLinks, childDeviceLinks, showChildLinks, setEdges, requestDelete, isAdmin]);
 
-    // Recolour util edges in place when live util or device status changes.
+    // Recolour util edges in place when live util (or the playback frame) or device status changes.
+    const shownUtil = play.util ?? util;
     useEffect(() => {
-        setEdges((eds) => eds.map((e) => (e.type === 'util' ? { ...e, data: { ...e.data, ...computeData(e.data as EdgeMeta, util, statusById) } } : e)));
-    }, [util, statusById, setEdges]);
+        setEdges((eds) => eds.map((e) => (e.type === 'util' ? { ...e, data: { ...e.data, ...computeData(e.data as EdgeMeta, shownUtil, statusById) } } : e)));
+    }, [shownUtil, statusById, setEdges]);
 
     // Patch each device node\'s busiest-util bar (and bps fallback) in place when live util changes.
     // Return the SAME node object when nothing changed, so the memoised DeviceNode skips it - on a
     // big map only the handful of cards that actually moved re-render, not every card every tick.
+    const shownDeviceUtil = play.deviceUtil ?? deviceUtil;
+    const shownDeviceLoad = play.deviceLoad ?? deviceLoad;
     useEffect(() => {
         setNodes((nds) => nds.map((n) => {
             if (n.type !== 'device') return n;
-            const util = deviceUtil[Number(n.id)] ?? null;
-            const load = deviceLoad[Number(n.id)] ?? null;
+            const util = shownDeviceUtil[Number(n.id)] ?? null;
+            const load = shownDeviceLoad[Number(n.id)] ?? null;
             const cur = n.data as { util?: number | null; load?: number | null };
             if (cur.util === util && cur.load === load) return n;
             return { ...n, data: { ...n.data, util, load } };
         }));
-    }, [deviceUtil, deviceLoad, setNodes]);
+    }, [shownDeviceUtil, shownDeviceLoad, setNodes]);
 
     // Patch device data (status / metrics / name / model) in place when the devices query
     // updates - so a status or cpu/mem/temp change never rebuilds the node graph (which would
@@ -648,12 +731,12 @@ export function MapCanvas() {
                 // Loose: any handle is both in & out - direction doesn\'t matter (floating
                 // edges compute geometry from the cards, so a link\'s a/b end is cosmetic).
                 connectionMode={ConnectionMode.Loose}
-                nodesDraggable={isAdmin}
-                nodesConnectable={isAdmin}
+                nodesDraggable={canDrag}
+                nodesConnectable={canDrag}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onNodeDragStop={(_, node, dragged) => {
-                    if (!isAdmin || activeMapId === null) return;
+                    if (!canDrag || activeMapId === null) return;
                     // A multi-select drag moves every selected node, but React Flow hands us the one
                     // under the cursor as `node` - the full set is the third argument. Persist ALL of
                     // them, in one request; saving only `node` left the rest of the group unsaved and
@@ -689,7 +772,7 @@ export function MapCanvas() {
                     // Drag a link's end onto a different side of a card to pin it there. Only a
                     // side change on the SAME two ends is a "move"; dropping onto another card is
                     // ignored (that would be a rebind). Pins are honoured when Auto-attach is off.
-                    if (!isAdmin || !conn.source || !conn.target) return;
+                    if (!canDrag || !conn.source || !conn.target) return;
                     if (oldEdge.type === 'util') {
                         const l = intraLinks.find((x) => String(x.id) === String(oldEdge.id));
                         if (!l || String(l.a_device_id) !== conn.source || String(l.b_device_id) !== conn.target) return;
@@ -720,6 +803,16 @@ export function MapCanvas() {
                         selectDevice(Number(node.id));
                         setInspectorOpen(true); // surface the inspector sheet on phones/tablets
                     }
+                }}
+                // Right-click a device card -> manage it in place (GitHub #45): parent, remove
+                // from this map, delete. Selecting it first makes the menu's target unambiguous
+                // (focus ring + the inspector follows along). Admin-only, like every write here;
+                // other node types keep the browser's own menu.
+                onNodeContextMenu={(e, node) => {
+                    if (!isAdmin || node.type !== 'device') return;
+                    e.preventDefault();
+                    selectDevice(Number(node.id));
+                    setNodeMenu({ deviceId: Number(node.id), x: e.clientX, y: e.clientY });
                 }}
                 // Click the empty canvas to deselect - the inspector then shows the map tools.
                 onPaneClick={() => selectDevice(null)}
@@ -754,6 +847,8 @@ export function MapCanvas() {
                     React Flow dot field, and gives the canvas depth against the mesh glow. */}
                 <Background id="major" variant={BackgroundVariant.Lines} gap={128} lineWidth={1} color={theme === 'light' ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.028)'} />
                 <Background id="minor" variant={BackgroundVariant.Dots} gap={32} size={1} color={theme === 'light' ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.05)'} />
+                {/* Custom background image (GitHub #37) - self-contained layer + its admin panel. */}
+                <MapBackground mapId={activeMapId} />
                 <MapControls />
                 <MiniMap
                     pannable
@@ -772,6 +867,7 @@ export function MapCanvas() {
                 <div className="flex flex-wrap items-center gap-2">
                     <MapBreadcrumb />
                     <MapSwitcher />
+                    <PlaybackBadge pb={play.pb} />
                     <span className="pointer-events-none hidden rounded-full bg-surface/80 px-3 py-1.5 font-mono text-[11px] tabular-nums text-white/50 ring-1 ring-white/10 backdrop-blur-xl sm:inline-block">
                         {mapDevices.length} nodes - {intraLinks.length} links
                     </span>
@@ -836,6 +932,14 @@ export function MapCanvas() {
                             >
                                 <Globe weight="light" className="h-4 w-4 text-sky-300" />
                                 <span className="hidden md:inline">Internet</span>
+                            </button>
+                            <button
+                                onClick={() => setDeviceDialog({ defaults: { name: 'Switch', mgmt_ip: '', device_type: 'switch', poll_method: 'none' } })}
+                                title="Add a static object with no IP (a dumb switch, patch panel...) - drawn and linked to, never polled"
+                                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-white/75 transition-colors duration-300 ease-fluid hover:bg-white/10 hover:text-white active:scale-[0.98]"
+                            >
+                                <Cube weight="light" className="h-4 w-4 text-amber-300" />
+                                <span className="hidden md:inline">Static</span>
                             </button>
                             <button
                                 onClick={() => setAddChildMap(true)}
@@ -954,6 +1058,9 @@ export function MapCanvas() {
                                             <button onClick={() => { setDeviceDialog({ defaults: { name: 'Internet', mgmt_ip: '1.1.1.1', device_type: 'internet', poll_method: 'none' } }); setToolsMenu(false); }} className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-xs text-white/80 transition-colors hover:bg-white/10">
                                                 <Globe weight="light" className="h-4 w-4 text-sky-300" /> Add internet object
                                             </button>
+                                            <button onClick={() => { setDeviceDialog({ defaults: { name: 'Switch', mgmt_ip: '', device_type: 'switch', poll_method: 'none' } }); setToolsMenu(false); }} className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-xs text-white/80 transition-colors hover:bg-white/10">
+                                                <Cube weight="light" className="h-4 w-4 text-amber-300" /> Add static object
+                                            </button>
                                             <div className="my-1 h-px bg-white/10" />
                                             <p className="px-2.5 pb-1 pt-1 text-[10px] uppercase tracking-wide text-white/30">Auto-layout</p>
                                             {LAYOUTS.map(({ kind, label, Icon, iconClass }) => (
@@ -979,6 +1086,8 @@ export function MapCanvas() {
                 </div>
             </div>
 
+            {play.pb.active && <PlaybackBar pb={play.pb} inset="left-16 right-4" deviceName={(id) => devices?.find((d) => d.id === id)?.name ?? `device ${id}`} />}
+
             {/* Open the inspector sheet on phones/tablets (it\'s off-canvas there). At lg+ the
                 inspector is a permanent column, so this is hidden. */}
             <button
@@ -1001,6 +1110,42 @@ export function MapCanvas() {
             )}
 
             {pending && devices && <LinkBinderDialog pending={pending} devices={devices} onClose={() => setPending(null)} />}
+
+            {/* Right-click device management (GitHub #45). The device is resolved live by id, so a
+                menu left open over a device that has just gone simply closes itself. */}
+            {nodeMenu !== null &&
+                (() => {
+                    const d = (devices ?? []).find((x) => x.id === nodeMenu.deviceId);
+                    if (!d) return null;
+                    return (
+                        <MapNodeMenu
+                            device={d}
+                            x={nodeMenu.x}
+                            y={nodeMenu.y}
+                            onThisMap={memberSet.has(d.id)}
+                            onSetParent={() => setParentForId(d.id)}
+                            onClearParent={() =>
+                                updateDevice.mutate(
+                                    { id: d.id, parent_device_id: null },
+                                    { onError: () => pushToast({ title: 'Couldn\'t clear the parent', tone: 'down' }) },
+                                )
+                            }
+                            onRemoveFromMap={() => activeMapId !== null && removeFromMap.mutate({ mapId: activeMapId, deviceId: d.id })}
+                            onDelete={() => setDeleteDeviceId(d.id)}
+                            onClose={() => setNodeMenu(null)}
+                        />
+                    );
+                })()}
+
+            {/* Re-home a device onto its real uplink - from the node menu or the inspector. */}
+            {parentForId !== null && devices?.some((d) => d.id === parentForId) && (
+                <SetParentDialog device={devices.find((d) => d.id === parentForId)!} onClose={() => setParentForId(null)} />
+            )}
+
+            {/* Delete the device outright - the destructive twin of "Remove from this map". */}
+            {deleteDeviceId !== null && devices?.some((d) => d.id === deleteDeviceId) && (
+                <DeleteDeviceDialog device={devices.find((d) => d.id === deleteDeviceId)!} onClose={() => setDeleteDeviceId(null)} />
+            )}
 
             {/* Add a device (or a generic internet object) straight onto this map: create it, then
                 drop it at the current viewport centre and select it. The dialog creates with

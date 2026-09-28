@@ -9,11 +9,14 @@ import { DeviceInspector } from '../topology/components/DeviceInspector';
 import { GeoView } from '../geo/components/GeoView';
 import { DashboardView } from '../dashboard/components/DashboardView';
 import { DevicesView } from '../devices/components/DevicesView';
+import { DevicePage } from '../device-page/components/DevicePage';
 import { DiscoveryView } from '../discovery/components/DiscoveryView';
 import { GraphsView } from '../graphs/components/GraphsView';
 import { ToolsView } from '../tools/components/ToolsView';
 import { OutagesView } from '../outages/components/OutagesView';
 import { useOutages } from '../outages/api/getOutages';
+import { useFiringAlerts } from '../alerts/api/alertEvents';
+import { useCurrentUser } from '../auth/api/auth';
 import { SettingsView } from '../settings/components/SettingsView';
 import { AlertsView } from '../alerts/components/AlertsView';
 import { UpgradesView } from '../upgrades/components/UpgradesView';
@@ -34,6 +37,8 @@ export function AppShell() {
     const view = useView();
     const wallboard = useWallboard();
     const openOutages = useOutages('open');
+    const { data: me } = useCurrentUser();
+    const firingAlerts = useFiringAlerts(me !== undefined && me !== null && !me.restricted);
 
     // Keep wallboard in step with the Fullscreen API: leaving fullscreen (Esc, or the
     // browser\'s own control) exits wallboard. Esc also works when fullscreen is
@@ -64,6 +69,7 @@ export function AppShell() {
             {view === 'geo' && <GeoView />}
             {view === 'dashboard' && <DashboardView />}
             {view === 'devices' && <DevicesView />}
+            {view === 'device' && <DevicePage />}
             {view === 'discovery' && <DiscoveryView />}
             {view === 'graphs' && <GraphsView />}
             {view === 'tools' && <ToolsView />}
@@ -117,7 +123,7 @@ export function AppShell() {
             <TopBar />
 
             <div className="flex min-h-0 flex-1">
-                <NavRail outageCount={openOutages.data?.length ?? 0} />
+                <NavRail outageCount={openOutages.data?.length ?? 0} alertCount={firingAlerts.data?.length ?? 0} />
                 {mainView}
                 {view === 'map' && <DeviceInspector />}
             </div>
