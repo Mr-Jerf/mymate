@@ -10,6 +10,7 @@ use App\Models\Site;
 use App\Models\StatusIncident;
 use App\Models\StatusIncidentUpdate;
 use App\Models\User;
+use App\Actions\Outages\RecordOutage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -70,6 +71,22 @@ class NetworkStatusMaintenanceTest extends TestCase
         $this->postJson("/api/outages/{$outage->id}/updates", ['message' => 'Should be rejected'])
             ->assertForbidden();
     }
+    public function test_record_outage_does_not_create_public_incident_during_site_maintenance(): void
+    {
+        $site = Site::factory()->create(['state_code' => 'UT']);
+        $device = Device::factory()->create(['site_id' => $site->id, 'monitored' => true, 'status' => 'down']);
+        MaintenanceWindow::factory()->create([
+            'starts_at' => now()->subMinute(),
+            'ends_at' => now()->addHour(),
+            'scope' => ['type' => 'sites', 'site_ids' => [$site->id]],
+        ]);
+
+        app(RecordOutage::class)->open($device);
+
+        $this->assertDatabaseHas('outages', ['device_id' => $device->id, 'status_incident_id' => null]);
+        $this->assertDatabaseMissing('status_incidents', ['site_id' => $site->id]);
+    }
+
     public function test_public_status_includes_state_outage_status_feed_without_device_details(): void
     {
         $site = Site::factory()->create(['state_code' => 'UT']);

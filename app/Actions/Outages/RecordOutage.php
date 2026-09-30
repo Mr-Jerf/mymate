@@ -6,6 +6,7 @@ use App\Models\Device;
 use App\Models\Outage;
 use App\Models\StatusIncident;
 use App\Services\NetworkStatus;
+use App\Support\MaintenanceGuard;
 use App\Support\StatusNotificationDispatcher;
 use Illuminate\Support\Facades\DB;
 
@@ -19,6 +20,9 @@ class RecordOutage
                 ['device_id' => $device->id, 'ended_at' => null],
                 ['started_at' => now(), 'cause' => 'unreachable'],
             );
+            // Planned work remains raw monitoring evidence, but must not create or mutate
+            // a customer-facing incident while the device is covered.
+            if ((new MaintenanceGuard)->covers($device->id)) return;
             $site = $device->site;
             $state = $site?->state_code;
             if ($site === null || $state === null || ! isset(NetworkStatus::STATES[$state])) return;
