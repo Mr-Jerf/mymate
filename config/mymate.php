@@ -48,6 +48,11 @@ return [
         'fail_threshold' => max(1, (int) env('MYMATE_PING_FAIL_THRESHOLD', 3)),
     ],
 
+    // Delay before a raw device outage becomes a customer-facing incident.
+    'status' => [
+        'incident_delay_minutes' => max(1, (int) env('MYMATE_STATUS_INCIDENT_DELAY_MINUTES', 5)),
+    ],
+
     // Live MTR traces (the device inspector's Trace button).
     'trace' => [
         // Path to the mtr binary. Null = auto-detect (common bin/sbin locations, then PATH).

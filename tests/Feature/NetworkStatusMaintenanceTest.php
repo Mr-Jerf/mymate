@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Actions\Outages\PromotePendingOutages;
 use App\Models\MaintenanceWindow;
 use App\Models\Device;
 use App\Models\Outage;
@@ -17,6 +18,21 @@ use Tests\TestCase;
 class NetworkStatusMaintenanceTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_short_outage_is_not_promoted_but_persistent_outage_is(): void
+    {
+        $site = Site::factory()->create(['state_code' => 'UT']);
+        $device = Device::factory()->create(['site_id' => $site->id, 'monitored' => true, 'status' => 'down']);
+        $this->travelTo(now()->startOfMinute());
+        app(RecordOutage::class)->open($device);
+        app(PromotePendingOutages::class)();
+        $this->assertDatabaseMissing('status_incidents', ['site_id' => $site->id]);
+
+        $this->travel(6)->minutes();
+        app(PromotePendingOutages::class)();
+        $this->assertDatabaseHas('status_incidents', ['site_id' => $site->id, 'severity' => 'degraded']);
+        $this->travelBack();
+    }
 
     public function test_maintenance_window_accepts_overview_and_description(): void
     {

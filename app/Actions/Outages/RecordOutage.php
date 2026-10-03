@@ -23,6 +23,9 @@ class RecordOutage
             // Planned work remains raw monitoring evidence, but must not create or mutate
             // a customer-facing incident while the device is covered.
             if ((new MaintenanceGuard)->covers($device->id)) return;
+            // Public incidents are promoted by PromotePendingOutages after the persistence
+            // delay; a fresh raw outage must never publish immediately here.
+            if ($outage->status_incident_id === null) return;
             $site = $device->site;
             $state = $site?->state_code;
             if ($site === null || $state === null || ! isset(NetworkStatus::STATES[$state])) return;
