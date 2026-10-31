@@ -13,6 +13,12 @@ of commit subjects.
 
 ## [Unreleased]
 
+### Changed
+- **Hardened SSH command runs.** Command execution is admin-only and template-only by default, uses a long Redis lease to prevent duplicate execution, preserves operator identity after account deletion, and prunes captured output after the configured retention window.
+
+### Removed
+- Removed internal command-runner lab compose files and helper scripts from the release tree.
+
 ## [2.0.0] - 2026-10-31
 
 A big one: remote agent upgrades, your own images on the map, an editable geo map, a way back in
@@ -107,7 +113,7 @@ when you lose a passkey, and a long list of fixes - including a critical PHP sec
   address, instead of asking its agent. Both now hand the walk to the agent on its next poll.
 - **Config backups on Docker are versioned again (GitHub #41).** The config was captured but the git
   commit failed with "Author identity unknown", so nothing showed on the Backups page. The backup
-  engine now always has a git identity (Rusted v0.1.1, plus the Docker and systemd service setup).
+  engine now always has a git identity (Rusted v0.2.1, plus the Docker and systemd service setup).
 - **Upgrading the package now restarts the backup engine (GitHub #41).** The .deb replaced the Rusted
   binary but left the old one running until a reboot, so an upgraded box kept failing MikroTik backups
   with "captured empty configuration" long after the fix shipped. When a device does return nothing,
