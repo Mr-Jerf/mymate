@@ -3,11 +3,10 @@
 namespace Tests\Feature;
 
 use App\Jobs\Tools\RunCommandJob;
+use App\Models\CommandRun;
+use App\Models\CommandTemplate;
 use App\Models\Device;
 use App\Models\User;
-use App\Models\CommandTemplate;
-use App\Models\CommandRun;
-use App\Models\CommandRunTarget;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -20,6 +19,7 @@ class CommandRunApiTest extends TestCase
     {
         config()->set('mymate.backup.url', 'http://127.0.0.1:8410');
         config()->set('mymate.backup.token', 'test-token');
+        config()->set('mymate.command.allow_free_text', true);
     }
 
     public function test_admin_can_start_a_command_for_selected_devices(): void
@@ -82,6 +82,20 @@ class CommandRunApiTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_command_run_requires_a_template_by_default(): void
+    {
+        $this->configureEngine();
+        config()->set('mymate.command.allow_free_text', false);
+        Queue::fake();
+        $this->actingAsUser();
+        $device = Device::factory()->create();
+
+        $this->postJson('/api/command-runs', [
+            'device_ids' => [$device->id], 'command' => '/system identity print', 'confirm' => true,
+        ])->assertStatus(422)->assertJsonValidationErrors('template_id');
+        Queue::assertNothingPushed();
+    }
+
     public function test_only_the_starter_or_admin_can_view_a_command_run(): void
     {
         $this->configureEngine();
@@ -106,6 +120,28 @@ class CommandRunApiTest extends TestCase
 
         $this->postJson('/api/command-runs', ['device_ids' => [], 'command' => ''])->assertStatus(422);
         Queue::assertNothingPushed();
+    }
+
+    public function test_command_run_keeps_operator_identity_when_user_is_deleted(): void
+    {
+        $this->configureEngine();
+        Queue::fake();
+        $admin = $this->actingAsUser();
+        $device = Device::factory()->create();
+
+        $runId = $this->postJson('/api/command-runs', [
+            'device_ids' => [$device->id], 'command' => '/system identity print', 'confirm' => true,
+        ])->json('run_id');
+
+        $this->assertDatabaseHas('command_runs', [
+            'id' => $runId, 'user_id' => $admin->id,
+            'user_name' => $admin->name, 'user_email' => $admin->email,
+        ]);
+        $admin->delete();
+        $this->assertDatabaseHas('command_runs', [
+            'id' => $runId, 'user_id' => null,
+            'user_name' => $admin->name, 'user_email' => $admin->email,
+        ]);
     }
 
     public function test_admin_can_create_and_list_command_templates(): void
@@ -155,7 +191,8 @@ class CommandRunApiTest extends TestCase
         $device = Device::factory()->create();
         $base = ['template_id' => $template->id, 'device_ids' => [$device->id], 'confirm' => true];
 
-        $this->postJson('/api/command-runs', $base)->assertStatus(422)->assertJsonValidationErrors('template_id');
+        $this->postJson('/api/command-runs', $base)->assertStatus(422)
+            ->assertJsonValidationErrors(['template_updated_at', 'command_hash']);
         $this->postJson('/api/command-runs', [...$base, 'template_updated_at' => $template->updated_at->toISOString(), 'command_hash' => 'wrong'])
             ->assertStatus(422)->assertJsonValidationErrors('command_hash');
         $this->postJson('/api/command-runs', [...$base, 'template_updated_at' => $template->updated_at->toISOString(), 'command_hash' => $template->commandHash()])
@@ -209,7 +246,10 @@ class CommandRunApiTest extends TestCase
         $device = Device::factory()->create();
 
         $this->postJson('/api/command-runs', [
-            'template_id' => $template->id, 'device_ids' => [$device->id], 'confirm' => true,
+            'template_id' => $template->id,
+            'template_updated_at' => $template->updated_at->toISOString(),
+            'command_hash' => $template->commandHash(),
+            'device_ids' => [$device->id], 'confirm' => true,
         ])->assertStatus(422)->assertJsonValidationErrors('template_id');
         Queue::assertNothingPushed();
     }

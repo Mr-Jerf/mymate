@@ -3,22 +3,23 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Command\StartCommandRunRequest;
 use App\Jobs\Tools\RunCommandJob;
-use App\Models\CommandTemplate;
 use App\Models\CommandRun;
 use App\Models\CommandRunTarget;
+use App\Models\CommandTemplate;
 use App\Models\Device;
 use App\Services\Tools\ToolRun;
+use App\Support\BackupSettings;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use App\Support\BackupSettings;
-use Carbon\CarbonImmutable;
 
 class CommandRunController extends Controller
 {
-    public function start(Request $request, BackupSettings $settings): JsonResponse
+    public function start(StartCommandRunRequest $request, BackupSettings $settings): JsonResponse
     {
         if (! $settings->configured()) {
             return response()->json(['message' => 'The backup engine (Rusted) is not configured yet.'], 422);
@@ -44,6 +45,10 @@ class CommandRunController extends Controller
             if (! hash_equals($template->commandHash(), (string) $request->input('command_hash'))) {
                 throw ValidationException::withMessages(['command_hash' => 'The command template hash does not match.']);
             }
+        }
+
+        if ($template === null && ! config('mymate.command.allow_free_text', false)) {
+            throw ValidationException::withMessages(['template_id' => 'A command template is required.']);
         }
 
         $command = trim((string) ($template?->command ?? $request->input('command', '')));
@@ -95,6 +100,8 @@ class CommandRunController extends Controller
         CommandRun::create([
             'id' => $runId,
             'user_id' => $request->user()->id,
+            'user_name' => $request->user()->name,
+            'user_email' => $request->user()->email,
             'template_id' => $template?->id,
             'command' => $command,
             'command_hash' => hash('sha256', $command),

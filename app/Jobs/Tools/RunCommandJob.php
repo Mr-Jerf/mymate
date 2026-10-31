@@ -3,9 +3,9 @@
 namespace App\Jobs\Tools;
 
 use App\Actions\Backup\RegisterBackupDevice;
-use App\Models\Device;
 use App\Models\CommandRun;
 use App\Models\CommandRunTarget;
+use App\Models\Device;
 use App\Services\Backup\RustedClient;
 use App\Services\Tools\ToolRun;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -37,16 +37,20 @@ class RunCommandJob implements ShouldQueue
         $device = Device::find($this->deviceId);
         if ($device === null) {
             $this->finish('failed', 'Device no longer exists.', '');
+
+            return;
+        }
+
+        // Cancellation is a preflight gate only. Once the device command has started,
+        // the stop flag is deliberately ignored because Rusted cannot safely interrupt it.
+        if (ToolRun::stopRequested($this->runId)) {
+            $this->finish('stopped', 'Run cancelled before execution.', '');
+
             return;
         }
 
         $this->startedAt = microtime(true);
         $this->setStatus('running');
-
-        if (ToolRun::stopRequested($this->runId)) {
-            $this->finish('stopped', 'Run cancelled before execution.', '');
-            return;
-        }
 
         try {
             ($register)($device);
@@ -65,6 +69,7 @@ class RunCommandJob implements ShouldQueue
             if (isset($result['devices'][(string) $this->deviceId])) {
                 $result['devices'][(string) $this->deviceId]['status'] = $status;
             }
+
             return $result;
         });
         CommandRunTarget::where('run_id', $this->runId)
@@ -88,6 +93,7 @@ class RunCommandJob implements ShouldQueue
             if ($statuses !== [] && count(array_diff($statuses, ['success', 'failed', 'stopped'])) === 0) {
                 $result['complete'] = true;
             }
+
             return $result;
         });
 
@@ -126,6 +132,7 @@ class RunCommandJob implements ShouldQueue
     private function boundedError(string $error): string
     {
         $error = trim($error);
+
         return mb_substr($error !== '' ? $error : 'Command failed.', 0, 300);
     }
 }
